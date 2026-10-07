@@ -29,6 +29,65 @@ switch (cmd)
         XlatCmd.Run(d, s, args[3], Convert.ToUInt32(args.Length > 4 ? args[4] : "20080", 16));
         break;
     }
+    case "cfields":
+    {
+        using var d = new DataDir(args[1]);
+        foreach (var (key, inst) in d.Files)
+            foreach (var info in inst.file.GetAssetsOfType(AssetClassID.ComputeShader))
+            {
+                var bf = d.Am.GetBaseField(inst, info);
+                if (bf["m_Name"].AsString != args[2]) continue;
+                void T(AssetTypeTemplateField t, string ind) { foreach (var c in t.Children) { Console.WriteLine($"{ind}{c.Name} : {c.Type}"); T(c, ind + "  "); } }
+                T(d.Am.GetTemplateBaseField(inst, info), "");
+                return 0;
+            }
+        break;
+    }
+    case "cdump":
+    {
+        using var d = new DataDir(args[1]);
+        foreach (var (key, inst) in d.Files)
+            foreach (var info in inst.file.GetAssetsOfType(AssetClassID.ComputeShader))
+            {
+                var bf = d.Am.GetBaseField(inst, info);
+                if (bf["m_Name"].AsString != args[2]) continue;
+                IEnumerable<AssetTypeValueField> A(AssetTypeValueField f) => f["Array"].Children;
+                string R(AssetTypeValueField r) => $"{r["name"].AsString}/{r["generatedName"].AsString}@{r["bindPoint"].AsInt}s{r["samplerBindPoint"].AsInt}d{r["texDimension"].AsInt}";
+                foreach (var v in A(bf["variants"]))
+                {
+                    Console.WriteLine($"variant renderer={v["targetRenderer"].AsInt} level={v["targetLevel"].AsInt} resolved={v["resourcesResolved"].AsBool}");
+                    foreach (var cb in A(v["constantBuffers"]))
+                        Console.WriteLine($"  CB {cb["name"].AsString} size {cb["byteSize"].AsInt}: " + string.Join("; ", A(cb["params"]).Select(p => $"{p["name"].AsString}@{p["offset"].AsUInt} t{p["type"].AsInt} {p["rowCount"].AsUInt}x{p["colCount"].AsUInt}[{p["arraySize"].AsUInt}]")));
+                    foreach (var k in A(v["kernels"]))
+                    {
+                        Console.WriteLine($"  kernel {k["name"].AsString} uniq={A(k["uniqueVariants"]).Count()} variantIndices=" + string.Join(" ", A(k["variantIndices"]).Select(p => $"[{p["first"].AsString}]->{p["second"].AsUInt}")) + $" global=[{string.Join(" ", A(k["globalKeywords"]).Select(x => x.AsString))}] local=[{string.Join(" ", A(k["localKeywords"]).Select(x => x.AsString))}] dyn=[{string.Join(" ", A(k["dynamicKeywords"]).Select(x => x.AsString))}]");
+                        int u = 0;
+                        foreach (var uv in A(k["uniqueVariants"]))
+                        {
+                            var code = uv["code"]["Array"].AsByteArray;
+                            Console.WriteLine($"    uv{u} cbIdx=[{string.Join(",", A(uv["cbVariantIndices"]).Select(x => x.AsUInt))}] cbs=[{string.Join(" ", A(uv["cbs"]).Select(R))}] tex=[{string.Join(" ", A(uv["textures"]).Select(R))}] samp=[{string.Join(" ", A(uv["builtinSamplers"]).Select(x => $"{x["sampler"].AsUInt:x}@{x["bindPoint"].AsInt}"))}] in=[{string.Join(" ", A(uv["inBuffers"]).Select(R))}] out=[{string.Join(" ", A(uv["outBuffers"]).Select(R))}] tg=[{string.Join(",", A(uv["threadGroupSize"]).Select(x => x.AsUInt))}] req={uv["requirements"].AsLong} code={code.Length}B head={Convert.ToHexString(code, 0, Math.Min(64, code.Length))}");
+                            if (args.Length > 3) File.WriteAllBytes(Path.Combine(args[3], $"{k["name"].AsString}.{u}.bin"), code);
+                            u++;
+                        }
+                    }
+                }
+                return 0;
+            }
+        break;
+    }
+    case "metalize":
+        return Metalize.Run(args[1], args[2]);
+    case "info":
+    {
+        using var d = new DataDir(args[1]);
+        foreach (var s in d.Shaders().Where(x => args.Length < 3 || x.Name == args[2]))
+        {
+            var bf = d.Base(s.File, s.PathId);
+            string L(string f) => string.Join(" | ", bf[f]["Array"].Children.Select(p => string.Join(",", p["Array"].IsDummy ? new[] { p.AsString } : p["Array"].Children.Select(x => x.AsString))));
+            Console.WriteLine($"{s.Name}: stageCounts=[{string.Join(",", bf["stageCounts"]["Array"].Children.Select(x => x.AsString))}] offsets={L("offsets")} clen={L("compressedLengths")} dlen={L("decompressedLengths")} blob={bf["compressedBlob"]["Array"].Children.Count}");
+        }
+        break;
+    }
     case "fields":
     {
         using var d = new DataDir(args[1]);

@@ -2,6 +2,7 @@
 // them. Resource kinds, dimensions, return types and strides come from the shader's own declarations; names
 // and constant buffer layouts come from Unity's parameter data, passed in as text (see Parse below).
 #include <cstdint>
+#include <algorithm>
 #include <cstring>
 #include <map>
 #include <sstream>
@@ -49,6 +50,13 @@ Desc Parse(const std::string &text)
         else if (k == "s") d.samplers[reg] = f.at(2);
         else if (k == "u") d.uavs[reg] = f.at(2);
         else throw std::runtime_error("bad desc record: " + line);
+    }
+    // Unity lists values grouped by kind; declare them in their original (offset) order like the source did.
+    auto byOffset = [](const Var &a, const Var &b) { return a.offset < b.offset; };
+    for (auto &kv : d.vars)
+    {
+        std::stable_sort(kv.second.begin(), kv.second.end(), byOffset);
+        for (auto &v : kv.second) std::stable_sort(v.members.begin(), v.members.end(), byOffset);
     }
     return d;
 }

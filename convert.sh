@@ -1,0 +1,101 @@
+#!/bin/sh
+# Turn your own Windows copy of Lethal Company into a native Apple Silicon app.
+#
+#   ./convert.sh --game "/path/to/Lethal Company"        # an existing Windows install (folder with Lethal Company_Data)
+#   ./convert.sh --steam-user <your Steam login name>    # download your copy's Windows files with Valve's SteamCMD
+#   options: --out "<path>.app" (default ~/Applications/Lethal Company.app)
+#
+# Nothing from the game, Unity or Valve is in this repository. Everything is downloaded from its official
+# source or built from source here, on your Mac, into ~/Library/Caches/lethal-mac-converter.
+set -eu
+HERE=$(cd "$(dirname "$0")" && pwd)
+export LMC_CACHE="${LMC_CACHE:-$HOME/Library/Caches/lethal-mac-converter}"
+OUT_APP="$HOME/Applications/Lethal Company.app"
+GAME= STEAM_USER=
+while [ $# -gt 0 ]; do
+  case $1 in
+    --game) GAME=$2; shift 2 ;;
+    --steam-user) STEAM_USER=$2; shift 2 ;;
+    --out) OUT_APP=$2; shift 2 ;;
+    *) echo "unknown option $1"; exit 2 ;;
+  esac
+done
+say() { printf '\n==> %s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+mkdir -p "$LMC_CACHE"
+
+# --- 0. requirements -----------------------------------------------------------------------------------
+[ "$(uname -m)" = arm64 ] || die "this converter builds for Apple Silicon Macs only"
+xcode-select -p >/dev/null 2>&1 || die "install Xcode Command Line Tools first: xcode-select --install"
+command -v python3 >/dev/null || die "python3 not found (it comes with the Command Line Tools)"
+if ! command -v dotnet >/dev/null && [ ! -x "$LMC_CACHE/dotnet/dotnet" ]; then
+  say "Installing the .NET SDK (Microsoft's official installer) into the cache"
+  curl -fsSL https://dot.net/v1/dotnet-install.sh -o "$LMC_CACHE/dotnet-install.sh"
+  sh "$LMC_CACHE/dotnet-install.sh" --channel 10.0 --install-dir "$LMC_CACHE/dotnet" >/dev/null
+fi
+if [ -x "$LMC_CACHE/dotnet/dotnet" ]; then export DOTNET_ROOT="$LMC_CACHE/dotnet" PATH="$LMC_CACHE/dotnet:$PATH"
+else export DOTNET_ROOT="$(dirname "$(readlink -f "$(command -v dotnet)")")"; fi
+export DOTNET_ROLL_FORWARD=Major DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+
+# --- 1. Unity's terms ----------------------------------------------------------------------------------
+if [ ! -f "$LMC_CACHE/unity-terms-accepted" ]; then
+  cat <<'TERMS'
+
+This converter downloads Unity's official macOS player runtime (Unity 2022.3.62f2, the engine version
+Lethal Company uses) from Unity's servers. Its use is governed by Unity's terms:
+  https://unity.com/legal/terms-of-service   https://unity.com/legal/editor-terms-of-service
+TERMS
+  printf 'Type "yes" to accept Unity'"'"'s terms and continue: '
+  read -r answer
+  [ "$answer" = yes ] || die "Unity's terms were not accepted"
+  date > "$LMC_CACHE/unity-terms-accepted"
+fi
+
+# --- 2. your Windows game files ------------------------------------------------------------------------
+if [ -n "$STEAM_USER" ]; then
+  # UNTESTED end to end: needs a real login. SteamCMD for macOS is an Intel binary (Rosetta).
+  arch -x86_64 /usr/bin/true 2>/dev/null || die "SteamCMD needs Rosetta: softwareupdate --install-rosetta --agree-to-license"
+  if [ ! -x "$LMC_CACHE/steamcmd/steamcmd.sh" ]; then
+    say "Downloading Valve's SteamCMD"
+    mkdir -p "$LMC_CACHE/steamcmd"
+    curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_osx.tar.gz | tar -xz -C "$LMC_CACHE/steamcmd"
+  fi
+  GAME="$LMC_CACHE/game"
+  say "Downloading your Windows copy (app 1966720) as $STEAM_USER; SteamCMD will ask for your password / Steam Guard"
+  "$LMC_CACHE/steamcmd/steamcmd.sh" +@sSteamCmdForcePlatformType windows +force_install_dir "$GAME" \
+    +login "$STEAM_USER" +app_update 1966720 validate +quit
+fi
+[ -n "$GAME" ] || die "pass --game <Windows install folder> or --steam-user <Steam login>"
+[ -d "$GAME/Lethal Company_Data" ] || die "no 'Lethal Company_Data' in $GAME"
+
+# --- 3. native libraries, built from source ------------------------------------------------------------
+PLUGINS="$LMC_CACHE/plugins"; rm -rf "$PLUGINS"; mkdir -p "$PLUGINS"
+say "Building the Steam layer";  sh "$HERE/native/steam/build.sh"
+say "Building voice chat";       sh "$HERE/native/voice/build.sh"
+cp "$HERE/native/steam/out/"* "$HERE/native/voice/out/"* "$PLUGINS/"
+say "Fetching Discord's Game SDK 3.2.1 (official download)"
+DZ="$LMC_CACHE/discord_game_sdk-3.2.1.zip"
+[ -f "$DZ" ] || curl -fsSL https://dl-game-sdk.discordapp.net/3.2.1/discord_game_sdk.zip -o "$DZ"
+echo "6757bb4a1f5b42aa7b6707cbf2158420278760ac5d80d40ca708bb01d20ae6b4  $DZ" | shasum -a 256 -c - >/dev/null || die "Discord SDK checksum mismatch"
+unzip -o -q -j "$DZ" lib/aarch64/discord_game_sdk.dylib -d "$PLUGINS"
+
+# --- 4. shaders: translate the game's Direct3D shaders to Metal -----------------------------------------
+say "Building the shader translator"
+OUT="$LMC_CACHE/tools" sh "$HERE/tools/xlat/build.sh"
+dotnet build "$HERE/tools/lmc/lmc.csproj" -c Release -v q -nologo -o "$LMC_CACHE/tools" >/dev/null
+if [ ! -f "$LMC_CACHE/classdata.tpk" ]; then
+  # Unity's class layouts for AssetsTools.NET, from the UABEA v8 release (MIT)
+  curl -fsSL https://github.com/nesrak1/UABEA/releases/download/v8/uabea-ubuntu.zip -o "$LMC_CACHE/uabea.zip"
+  echo "c542dd3b5b091b34645ee1c7180df7138f9f3fe5253222f151d7185e542402b2  $LMC_CACHE/uabea.zip" | shasum -a 256 -c - >/dev/null || die "UABEA checksum mismatch"
+  unzip -o -q -j "$LMC_CACHE/uabea.zip" classdata.tpk -d "$LMC_CACHE" && rm "$LMC_CACHE/uabea.zip"
+fi
+say "Translating shaders (several minutes)"
+DATA="$LMC_CACHE/data"; rm -rf "$DATA"; mkdir -p "$DATA"
+"$LMC_CACHE/tools/lmc" metalize "$GAME/Lethal Company_Data" "$DATA"
+
+# --- 5. assemble and sign the app ----------------------------------------------------------------------
+say "Assembling $OUT_APP"
+python3 -I "$HERE/scripts/assemble_app.py" --game "$GAME" --unity-pkg-cache "$LMC_CACHE/unity" \
+  --plugins "$PLUGINS" --data "$DATA" --out "$OUT_APP"
+codesign --force --deep -s - "$OUT_APP"
+say "Done: $OUT_APP"
