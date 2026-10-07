@@ -135,6 +135,8 @@ switch (cmd)
         Console.WriteLine($"stageCounts=[{string.Join(",", bf["stageCounts"]["Array"].Children.Select(x => x.AsString))}] keywordNames={bf["m_ParsedForm"]["m_KeywordNames"]["Array"].Children.Count}");
         break;
     }
+    case "users":
+        return ShaderUsers.Run(args[1], args[2]);
     case "videoosx": // <Unity Mac editor unity_builtin_extra> <data dir written by metalize>
         return VideoDecodeOSX.Run(args[1], args[2]);
     case "swap":

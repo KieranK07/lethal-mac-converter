@@ -23,7 +23,15 @@ Nothing from the game is ever shipped. Not affiliated with Zeekerss, Unity, Valv
 4. Wait. The first run takes about 30–40 min, most of it translating shaders.
 5. Play `~/Applications/Lethal Company.app`. If Steam is installed and closed, it also gets a tile in your Steam library.
 
-Run it again after a game update. Your Steam login is remembered; SteamCMD remembers its own session.
+## Updating
+
+When Lethal Company updates, your Windows friends get it automatically, and you need it too to play with them.
+Double-click `Convert Lethal Company.command` again:
+- It downloads only what changed. Your Steam login is remembered, and SteamCMD keeps its own session.
+- If neither the game nor the converter changed, it says "up to date" and stops (under a minute).
+- Otherwise it rebuilds, which takes about 10 min. The new app is built alongside the old one and swapped in at the end, so a failed update leaves your old app working.
+- Saves and settings live outside the app, so they're kept.
+- If an update moves the game to a newer Unity version, the converter stops with a clear message instead of building something broken. Get a newer converter then.
 
 **Already have the Windows files** (e.g. copied from a PC)? `./convert.sh --game "/path/to/Lethal Company"`.
 

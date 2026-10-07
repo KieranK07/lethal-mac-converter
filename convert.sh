@@ -5,7 +5,12 @@
 #     once and downloads your copy with Valve's SteamCMD
 #   ./convert.sh --game "/path/to/Lethal Company"        # use an existing Windows install instead
 #   ./convert.sh --steam-user <your Steam login name>
-#   options: --out "<path>.app" (default ~/Applications/Lethal Company.app), --no-steam-tile
+#   options: --out "<path>.app" (default ~/Applications/Lethal Company.app), --no-steam-tile,
+#            --force (rebuild even if the app is already up to date)
+#
+# Updating: run it again after Lethal Company updates. It downloads only what changed, and rebuilds only when
+# the game or this converter changed (about 10 min); otherwise it says the app is up to date. Saves and settings
+# live outside the app (~/Library/Application Support/com.ZeekerssRBLX.Lethal-Company), so they're kept.
 #
 # Nothing from the game, Unity or Valve is in this repository. Everything is downloaded from its official
 # source or built from source here, on your Mac, into ~/Library/Caches/lethal-mac-converter.
@@ -13,13 +18,14 @@ set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 export LMC_CACHE="${LMC_CACHE:-$HOME/Library/Caches/lethal-mac-converter}"
 OUT_APP="$HOME/Applications/Lethal Company.app"
-GAME= STEAM_USER= STEAM_TILE=1
+GAME= STEAM_USER= STEAM_TILE=1 FORCE=
 while [ $# -gt 0 ]; do
   case $1 in
     --game) GAME=$2; shift 2 ;;
     --steam-user) STEAM_USER=$2; shift 2 ;;
     --out) OUT_APP=$2; shift 2 ;;
     --no-steam-tile) STEAM_TILE=; shift ;;
+    --force) FORCE=1; shift ;;
     *) echo "unknown option $1"; exit 2 ;;
   esac
 done
@@ -78,6 +84,21 @@ if [ -n "$STEAM_USER" ]; then
 fi
 [ -n "$GAME" ] || die "pass --game <Windows install folder> or --steam-user <Steam login>"
 [ -d "$GAME/Lethal Company_Data" ] || die "no 'Lethal Company_Data' in $GAME"
+UNITY=$(head -c 4096 "$GAME/Lethal Company_Data/globalgamemanagers" | LC_ALL=C grep -a -o -m1 '20[0-9][0-9]\.[0-9]*\.[0-9]*f[0-9]*' || true)
+[ "$UNITY" = 2022.3.62f2 ] || die "this game build uses Unity ${UNITY:-?}; the converter supports 2022.3.62f2. Get a newer converter."
+
+# Up to date? The stamp names the game build (Steam build id, or a fingerprint of the files) and this converter.
+ACF="$GAME/steamapps/appmanifest_1966720.acf"
+if [ -f "$ACF" ]; then GAME_ID="steam-$(sed -n 's/.*"buildid"[[:space:]]*"\([0-9]*\)".*/\1/p' "$ACF" | head -1)"
+else GAME_ID="files-$(cd "$GAME" && find . -type f -print0 | sort -z | xargs -0 stat -f '%N %z %m' | shasum | cut -c1-16)"; fi
+CONV_ID=$(cd "$HERE" && find convert.sh tools scripts native -type f ! -path '*/out/*' ! -path '*/bin/*' ! -path '*/obj/*' ! -name '*.pyc' -print0 \
+  | sort -z | xargs -0 cat | shasum | cut -c1-16)
+STAMP="game=$GAME_ID converter=$CONV_ID"
+STAMP_FILE="$OUT_APP/Contents/Resources/converter-stamp.txt"
+if [ -z "$FORCE" ] && [ "$(cat "$STAMP_FILE" 2>/dev/null)" = "$STAMP" ]; then
+  say "$OUT_APP is up to date ($GAME_ID). Nothing to do."
+  exit 0
+fi
 
 # --- 3. native libraries, built from source ------------------------------------------------------------
 PLUGINS="$LMC_CACHE/plugins"; rm -rf "$PLUGINS"; mkdir -p "$PLUGINS"
@@ -114,10 +135,15 @@ python3 -I "$HERE/scripts/build_inputsystem.py" --game "$GAME" --unity-pkg-cache
   --out "$PLUGINS/Unity.InputSystem.dll"
 
 # --- 6. assemble and sign the app ----------------------------------------------------------------------
+# Built next to the old app and swapped in at the end, so a failed update leaves the old one working.
 say "Assembling $OUT_APP"
+NEW_APP="${OUT_APP%.app}.updating.app"
 python3 -I "$HERE/scripts/assemble_app.py" --game "$GAME" --unity-pkg-cache "$LMC_CACHE/unity" \
-  --plugins "$PLUGINS" --data "$DATA" --out "$OUT_APP"
-codesign --force --deep -s - "$OUT_APP"
+  --plugins "$PLUGINS" --data "$DATA" --out "$NEW_APP"
+echo "$STAMP" > "$NEW_APP/Contents/Resources/converter-stamp.txt"
+codesign --force --deep -s - "$NEW_APP"
+rm -rf "$OUT_APP"
+mv "$NEW_APP" "$OUT_APP"
 
 # --- 7. a tile in your Steam library (optional) ----------------------------------------------------------
 if [ -n "$STEAM_TILE" ] && [ -d "$HOME/Library/Application Support/Steam/userdata" ]; then
