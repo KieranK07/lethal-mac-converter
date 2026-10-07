@@ -46,7 +46,7 @@ static class ShaderDump
                     }
                     var common = pg["m_CommonParameters"];
                     if (!common.IsDummy)
-                        m.AppendLine($"    common: cb={common["m_ConstantBuffers"]["Array"].Children.Count} cbb={common["m_ConstantBufferBindings"]["Array"].Children.Count} tex={common["m_TextureParams"]["Array"].Children.Count} vec={common["m_VectorParams"]["Array"].Children.Count}");
+                        m.AppendLine("    common: " + string.Join(" ", common.Children.Select(c => $"{c.FieldName}={(c["Array"].IsDummy ? "?" : c["Array"].Children.Count)}")));
                 }
                 pI++;
             }

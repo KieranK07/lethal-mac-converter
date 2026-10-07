@@ -7,6 +7,11 @@ Sources of these facts:
 - the P/Invoke declarations in the game's `DissonanceVoip.dll`, which is public interface information
 - black-box parity testing against the Windows libraries
 - version fingerprinting against upstream open-source releases
+- **"dirty room" analysis of the Windows `AudioPluginDissonance.dll`, done earlier for interoperability.**
+  This covers which WebRTC components it enables and how it configures them, the order of calls, and how
+  the RNNoise frame is scaled. Those findings appear below only as plain-language facts about how the
+  open-source libraries are configured. No code, pseudo-code or structure from that analysis was passed on.
+  The implementer worked only from this document and upstream sources, and never saw the analysis output.
 
 ## Target
 Two macOS arm64 dynamic libraries that `DissonanceVoip.dll` loads through `DllImport`:
@@ -168,3 +173,11 @@ The expected result is bit-identical for:
 - AEC metrics
 - Opus packets
 - Opus decode, including PLC and FEC
+
+## Found during implementation (black-box)
+- **C runtime float maths.** Windows' UCRT returns correctly rounded `expf`/`powf`. Apple's libm is sometimes
+  1 ulp off near halfway values, which changed WebRTC noise suppression's startup noise model, so the AGC-off
+  path differed in 53 samples. `ucrt_float_math.c` evaluates those float functions in double and rounds
+  once, which matches UCRT.
+- UCRT's `logf`/`log10f` aren't reproduced this way. They only run on paths Lethal Company doesn't use
+  (AEC and metrics).

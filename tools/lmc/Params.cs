@@ -1,0 +1,166 @@
+using System.Text;
+using AssetsTools.NET;
+
+namespace Lmc;
+
+// Unity's per-subprogram parameter tables (2022.3 player format), as stored in a parameter blob entry or in a
+// program's m_CommonParameters. Index = byte offset inside the cbuffer for values, register/slot for bindings.
+record Param(string Name, int Type, int Rows, int Cols, bool Matrix, int Array, int Index);
+record StructParam(string Name, int Index, int Array, int Size, List<Param> Members);
+class Cb
+{
+    public string Name = ""; public int Size; public bool Partial;
+    public List<Param> Params = new(); public List<StructParam> Structs = new();
+}
+record Tex(string Name, int Index, int Sampler, uint Extra);
+record Bind(string Name, int Index, int Array);
+record Sampler(int Bind, uint State);
+
+sealed class Params
+{
+    public List<Cb> Cbs = new();
+    public List<Tex> Textures = new();
+    public List<Bind> CbBinds = new(), Buffers = new(), Uavs = new();
+    public List<Sampler> Samplers = new();
+
+    static string Str(BinaryReader r)
+    {
+        var s = Encoding.UTF8.GetString(r.ReadBytes(r.ReadInt32()));
+        r.BaseStream.Position = (r.BaseStream.Position + 3) & ~3L;
+        return s;
+    }
+
+    static Param ReadParam(BinaryReader r) => new(Str(r), r.ReadInt32(), r.ReadInt32(), r.ReadInt32(), r.ReadInt32() > 0, r.ReadInt32(), r.ReadInt32());
+
+    public static Params FromBlob(byte[] e)
+    {
+        var p = new Params();
+        var r = new BinaryReader(new MemoryStream(e));
+        r.ReadInt32(); // blob version
+        var ncb = r.ReadInt32();
+        for (var c = 0; c < ncb; c++)
+        {
+            var cb = new Cb { Name = Str(r), Size = r.ReadInt32() };
+            var np = r.ReadInt32();
+            for (var i = 0; i < np; i++) cb.Params.Add(ReadParam(r));
+            var ns = r.ReadInt32();
+            for (var i = 0; i < ns; i++)
+            {
+                var name = Str(r); var idx = r.ReadInt32(); var arr = r.ReadInt32(); var size = r.ReadInt32(); var n = r.ReadInt32();
+                cb.Structs.Add(new StructParam(name, idx, arr, size, Enumerable.Range(0, n).Select(_ => ReadParam(r)).ToList()));
+            }
+            p.Cbs.Add(cb);
+        }
+        var nb = r.ReadInt32();
+        for (var i = 0; i < nb; i++)
+        {
+            var name = Str(r);
+            switch (r.ReadInt32())
+            {
+                case 0: p.Textures.Add(new Tex(name, r.ReadInt32(), r.ReadInt32(), r.ReadUInt32())); break;
+                case 1: p.CbBinds.Add(new Bind(name, r.ReadInt32(), r.ReadInt32())); break;
+                case 2: p.Buffers.Add(new Bind(name, r.ReadInt32(), r.ReadInt32())); break;
+                case 3: p.Uavs.Add(new Bind(name, r.ReadInt32(), r.ReadInt32())); break;
+                case 4: p.Samplers.Add(new Sampler(r.ReadInt32(), r.ReadUInt32())); break;
+                case var t: throw new Exception($"binding type {t}");
+            }
+        }
+        if (r.BaseStream.Position != e.Length) throw new Exception($"parameter blob: {e.Length - r.BaseStream.Position} trailing bytes");
+        return p;
+    }
+
+    // m_CommonParameters (SerializedProgramParameters); names are indices into m_ParsedForm.m_NameIndices.
+    public static Params FromCommon(AssetTypeValueField f, Dictionary<int, string> names)
+    {
+        var p = new Params();
+        IEnumerable<AssetTypeValueField> A(AssetTypeValueField x) => x["Array"].Children;
+        string N(AssetTypeValueField x) => names[x["m_NameIndex"].AsInt];
+        Param Vec(AssetTypeValueField x) => new(N(x), x["m_Type"].AsInt, 1, x["m_Dim"].AsSByte, false, x["m_ArraySize"].AsInt, x["m_Index"].AsInt);
+        Param Mat(AssetTypeValueField x) => new(N(x), x["m_Type"].AsInt, x["m_RowCount"].AsSByte, x["m_ColumnCount"].IsDummy ? x["m_RowCount"].AsSByte : x["m_ColumnCount"].AsSByte, true, x["m_ArraySize"].AsInt, x["m_Index"].AsInt);
+        if (A(f["m_VectorParams"]).Any() || A(f["m_MatrixParams"]).Any()) throw new Exception("common top-level vector/matrix params (unexpected on D3D11)");
+        foreach (var c in A(f["m_ConstantBuffers"]))
+        {
+            var cb = new Cb { Name = N(c), Size = c["m_Size"].AsInt, Partial = c["m_IsPartialCB"].AsBool };
+            cb.Params.AddRange(A(c["m_MatrixParams"]).Select(Mat));
+            cb.Params.AddRange(A(c["m_VectorParams"]).Select(Vec));
+            foreach (var s in A(c["m_StructParams"]))
+                cb.Structs.Add(new StructParam(N(s), s["m_Index"].AsInt, s["m_ArraySize"].AsInt, s["m_StructSize"].AsInt,
+                    A(s["m_MatrixMembers"]).Select(Mat).Concat(A(s["m_VectorMembers"]).Select(Vec)).ToList()));
+            p.Cbs.Add(cb);
+        }
+        foreach (var t in A(f["m_TextureParams"]))
+            p.Textures.Add(new Tex(N(t), t["m_Index"].AsInt, t["m_SamplerIndex"].AsInt, (uint)((t["m_MultiSampled"].AsBool ? 1 : 0) | (t["m_Dim"].AsSByte << 1))));
+        foreach (var b in A(f["m_ConstantBufferBindings"])) p.CbBinds.Add(new Bind(N(b), b["m_Index"].AsInt, b["m_ArraySize"].AsInt));
+        foreach (var b in A(f["m_BufferParams"])) p.Buffers.Add(new Bind(N(b), b["m_Index"].AsInt, b["m_ArraySize"].AsInt));
+        foreach (var b in A(f["m_UAVParams"])) p.Uavs.Add(new Bind(N(b), b["m_Index"].AsInt, b["m_OriginalIndex"].AsInt));
+        foreach (var s in A(f["m_Samplers"])) p.Samplers.Add(new Sampler(s["bindPoint"].AsInt, s["sampler"].AsUInt));
+        return p;
+    }
+
+    // This subprogram's view: its own tables plus the program's common ones. A partial common cbuffer adds its
+    // values to the subprogram's cbuffer of the same name.
+    public Params Merge(Params common)
+    {
+        var p = new Params();
+        foreach (var cb in Cbs)
+        {
+            var copy = new Cb { Name = cb.Name, Size = cb.Size, Params = new(cb.Params), Structs = new(cb.Structs) };
+            foreach (var part in common.Cbs.Where(c => c.Partial && c.Name == cb.Name)) { copy.Params.AddRange(part.Params); copy.Structs.AddRange(part.Structs); }
+            p.Cbs.Add(copy);
+        }
+        p.Cbs.AddRange(common.Cbs.Where(c => !c.Partial && Cbs.All(x => x.Name != c.Name)));
+        p.Textures = Textures.Concat(common.Textures).ToList();
+        p.CbBinds = CbBinds.Concat(common.CbBinds).ToList();
+        p.Buffers = Buffers.Concat(common.Buffers).ToList();
+        p.Uavs = Uavs.Concat(common.Uavs).ToList();
+        p.Samplers = Samplers.Concat(common.Samplers).ToList();
+        return p;
+    }
+
+    // Unity's encoding of an inline sampler state -> a sampler name HLSLcc recognises as that inline sampler.
+    // Only the states this game uses are known; anything else must fail loudly rather than sample wrongly.
+    static readonly Dictionary<uint, string> InlineSamplers = new()
+    {
+        [1] = "s_linear_repeat_sampler",
+        [54] = "s_point_clamp_sampler",
+        [55] = "s_linear_clamp_sampler",
+        [56] = "s_trilinear_clamp_sampler",
+        [155] = "s_linear_clamp_compare_sampler",
+    };
+
+    // Description text for xlat's RDEF rebuild (record formats in tools/xlat/rdef.cpp).
+    public string ToDesc()
+    {
+        var sb = new StringBuilder();
+        void Line(params object[] f) => sb.Append(string.Join('\t', f)).Append('\n');
+        foreach (var b in CbBinds)
+        {
+            var cb = Cbs.FirstOrDefault(c => c.Name == b.Name) ?? throw new Exception($"cbuffer binding '{b.Name}' has no layout");
+            Line("cb", b.Index, cb.Name, cb.Size);
+            foreach (var v in cb.Params) Line(VarRecord("v", b.Index, v));
+            foreach (var s in cb.Structs)
+            {
+                Line("v", b.Index, s.Name, s.Index, 5, 0, 0, 0, s.Array);
+                Line("ss", b.Index, s.Size);
+                foreach (var m in s.Members) Line(VarRecord("sv", b.Index, m));
+            }
+        }
+        // $Globals has no binding entry when it is the only cbuffer at register 0? Unity always emits one; checked by xlat.
+        foreach (var t in Textures) Line("t", t.Index, t.Name);
+        foreach (var b in Buffers) Line("t", b.Index, b.Name);
+        foreach (var u in Uavs) Line("u", u.Index, u.Name);
+        foreach (var s in Samplers)
+            Line("s", s.Bind, InlineSamplers.TryGetValue(s.State, out var n) ? n : throw new Exception($"unknown inline sampler state {s.State}"));
+        foreach (var t in Textures.Where(t => t.Sampler >= 0 && Samplers.All(s => s.Bind != t.Sampler)).GroupBy(t => t.Sampler))
+            Line("s", t.Key, "sampler" + t.First().Name);
+        return sb.ToString();
+    }
+
+    // Unity type 0 = float, 1 = int (uint is reported as int too); D3D classes: 0 scalar, 1 vector, 3 matrix (column-major).
+    static string VarRecord(string kind, int reg, Param v)
+    {
+        var svt = v.Type switch { 0 => 3, 1 => 2, 2 => 1, _ => throw new Exception($"param type {v.Type} ({v.Name})") };
+        var cls = v.Matrix ? 3 : v.Cols > 1 ? 1 : 0;
+        return string.Join('\t', kind, reg, v.Name, v.Index, cls, svt, v.Rows, v.Cols, v.Array);
+    }
+}

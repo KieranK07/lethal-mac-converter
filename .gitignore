@@ -6,3 +6,6 @@
 *.app/
 bin/
 obj/
+
+# test audio is generated locally (macOS `say`), not committed
+native/voice/test/speech.wav

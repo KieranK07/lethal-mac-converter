@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <!-- macOS: dotnet build (after ../build.sh; it copies ../out/*.dylib). Windows (PC, against the game's DLL): dotnet build -r win-x64, then copy AudioPluginDissonance.dll next to the exe. -->
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">osx-arm64</RuntimeIdentifier>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="../out/libAudioPluginDissonance.dylib;../out/libopus.dylib" CopyToOutputDirectory="Always" Link="%(Filename)%(Extension)" Condition="'$(RuntimeIdentifier)' == 'osx-arm64'" />
+    <None Include="speech.wav" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
