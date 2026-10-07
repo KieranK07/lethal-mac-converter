@@ -40,8 +40,7 @@ Hash sources (md5 unless noted):
 | `Contents/PlugIns/discord_game_sdk.dylib` | Discord SDK (fetched at convert time) | other stage |
 | `Contents/_CodeSignature/CodeResources` | `codesign --force --deep -s -` | — |
 
-- **No icon:** `CFBundleIconFile` names `PlayerIcon.icns`, but the pkg's is 0 bytes and the hybrid ships none (Finder shows the generic icon).
-- **Optional:** extract the icon from the game's `Lethal Company.exe` resources.
+- **Icon:** `PlayerIcon.icns` is generated from the game's own `Lethal Company.exe` icon resource (largest image, 256 px) with `sips` + `iconutil`.
 
 ## 3. File mapping: `Contents/Resources/Data/`
 

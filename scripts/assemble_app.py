@@ -17,7 +17,7 @@ Sources (see docs/APP-LAYOUT.md for the file-by-file mapping and the evidence):
     Managed/, Plugins/ and the three startup configs in it are ignored; this stage owns them.
 Shader translation is a separate stage. stdlib only.
 """
-import argparse, hashlib, json, os, plistlib, re, shutil, stat, struct, subprocess, sys
+import argparse, hashlib, json, os, plistlib, re, shutil, stat, struct, subprocess, sys, tempfile
 import urllib.request, zlib
 import xml.etree.ElementTree as ET
 
@@ -228,6 +228,66 @@ def patch_hdrp(path):
     open(path, 'wb').write(b)
 
 
+def exe_icon(exe):
+    """The largest image of the first icon group in a Windows .exe's resources: (bytes, is_png)."""
+    b = open(exe, 'rb').read()
+    pe = struct.unpack_from('<I', b, 0x3c)[0]
+    if b[pe:pe + 4] != b'PE\0\0':
+        die(f'{exe}: not a PE file')
+    nsec, optsz = struct.unpack_from('<H', b, pe + 6)[0], struct.unpack_from('<H', b, pe + 20)[0]
+    opt = pe + 24
+    rsrc = struct.unpack_from('<I', b, opt + (112 if struct.unpack_from('<H', b, opt)[0] == 0x20b else 96) + 16)[0]
+    def off(rva):
+        for i in range(nsec):
+            vsz, va, rawsz, raw = struct.unpack_from('<IIII', b, opt + optsz + 40 * i + 8)
+            if va <= rva < va + max(vsz, rawsz):
+                return rva - va + raw
+        die(f'{exe}: bad resource address')
+    base = off(rsrc)
+    def entries(d):  # resource directory at base+d: [(id, offset, is_dir)]
+        named, ids = struct.unpack_from('<HH', b, base + d + 12)
+        return [(n, p & 0x7fffffff, bool(p & 0x80000000))
+                for n, p in (struct.unpack_from('<II', b, base + d + 16 + 8 * i) for i in range(named + ids))]
+    def leaf(d):  # first language's data under a directory
+        _, o, is_dir = entries(d)[0]
+        while is_dir:
+            _, o, is_dir = entries(o)[0]
+        rva, size = struct.unpack_from('<II', b, base + o)
+        return b[off(rva):off(rva) + size]
+    types = {i: o for i, o, _ in entries(0)}
+    if 3 not in types or 14 not in types:
+        die(f'{exe}: no icon resources')
+    group = leaf(entries(types[14])[0][1])  # GRPICONDIR: 6-byte header, 14-byte entries (w, h, ..., bpp, size, id)
+    best = max((struct.unpack_from('<BBBBHHIH', group, 6 + 14 * k) for k in range(struct.unpack_from('<H', group, 4)[0])),
+               key=lambda e: (e[0] or 256, e[5]))
+    img = leaf({i: o for i, o, _ in entries(types[3])}[best[7]])
+    if img[:8] == b'\x89PNG\r\n\x1a\n':
+        return img, True
+    # a bare DIB: wrap it as a one-image .ico, which sips can read
+    return struct.pack('<HHHBBBBHHII', 0, 1, 1, best[0], best[1], 0, 0, 1, best[5], len(img), 22) + img, False
+
+
+def write_icns(exe, icns):
+    """macOS icon from the game's own .exe icon (all sizes up to the source's, as Finder expects)."""
+    with tempfile.TemporaryDirectory() as t:
+        img, is_png = exe_icon(exe)
+        src = os.path.join(t, 'icon.png' if is_png else 'icon.ico')
+        open(src, 'wb').write(img)
+        png = os.path.join(t, 'big.png')
+        subprocess.run(['sips', '-s', 'format', 'png', src, '--out', png], check=True, capture_output=True)
+        size = int(re.search(r'pixelWidth: (\d+)', subprocess.run(['sips', '-g', 'pixelWidth', png], check=True,
+                                                                  capture_output=True, text=True).stdout).group(1))
+        iconset = os.path.join(t, 'PlayerIcon.iconset')
+        os.makedirs(iconset)
+        for pt in (16, 32, 128, 256, 512):
+            for scale in (1, 2):
+                if pt * scale <= size:
+                    name = f'icon_{pt}x{pt}{"@2x" if scale == 2 else ""}.png'
+                    subprocess.run(['sips', '-z', str(pt * scale), str(pt * scale), png, '--out', os.path.join(iconset, name)],
+                                   check=True, capture_output=True)
+        subprocess.run(['iconutil', '-c', 'icns', iconset, '-o', icns], check=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--game', required=True, help='Windows game dir (contains <Name>_Data)')
@@ -277,6 +337,7 @@ def main():
     })
     plistlib.dump(info, open(os.path.join(C, 'Info.plist'), 'wb'))
     plistlib.dump({'Screenmanager Is Fullscreen mode': 'True'}, open(os.path.join(R, 'DefaultPreferences.plist'), 'wb'))
+    write_icns(os.path.join(a.game, product + '.exe'), os.path.join(R, info['CFBundleIconFile']))  # the game's icon
 
     # Data: the game's, minus Windows-only parts, plus the patched files
     clone(gdata, D)
