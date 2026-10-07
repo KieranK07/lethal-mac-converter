@@ -41,6 +41,23 @@ need_steamcmd() {  # Valve's SteamCMD for macOS, an Intel binary (Rosetta)
     curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_osx.tar.gz | tar -xz -C "$LMC_CACHE/steamcmd"
   fi
 }
+# Steam keeps shortcuts.vdf in memory and writes it back on exit, so it must be closed while we add the
+# library entry; and SteamCMD signing in as you signs the Steam app out. Close it once; reopen it on exit.
+close_steam() {  # $1: why
+  pgrep -x steam_osx >/dev/null || return 0
+  say "Closing Steam for a moment ($1); it reopens at the end"
+  osascript -e 'quit app "Steam"' >/dev/null 2>&1 || true
+  for _ in $(seq 60); do pgrep -x steam_osx >/dev/null || break; sleep 1; done
+  trap 'open -a Steam' EXIT
+}
+# "Lethal Company" in your Steam library, launching this app: the way to get the Steam overlay (Shift+Tab),
+# since Steam only injects it into games it starts. Uses the real game's artwork from Steam's cache.
+add_steam_tile() {
+  [ -n "$STEAM_TILE" ] && [ -d "$HOME/Library/Application Support/Steam/userdata" ] || return 0
+  python3 -I "$HERE/scripts/steam_shortcut.py" --app "$OUT_APP" --check && return 0
+  close_steam "to add Lethal Company to your library"
+  python3 -I "$HERE/scripts/steam_shortcut.py" --app "$OUT_APP" || echo "(could not add the Steam library entry)"
+}
 # A LaunchAgent that checks Steam once a day (and at login) and notifies when the game has updated.
 install_update_check() {
   [ -n "$UPDATE_CHECK" ] || return 0
@@ -96,13 +113,8 @@ if [ -n "$STEAM_USER" ]; then
   need_steamcmd  # the real-login download is still untested end to end
   GAME="$LMC_CACHE/game"
   # SteamCMD signing in as you replaces the Steam app's session ("Session Replaced"), and the app doesn't
-  # reconnect by itself, so games then can't reach Steam. Close Steam now and reopen it when we finish.
-  if pgrep -x steam_osx >/dev/null; then
-    say "Closing Steam while your copy downloads (it would be signed out anyway); it reopens at the end"
-    osascript -e 'quit app "Steam"' >/dev/null 2>&1 || true
-    for _ in $(seq 60); do pgrep -x steam_osx >/dev/null || break; sleep 1; done
-    trap 'open -a Steam' EXIT
-  fi
+  # reconnect by itself, so games then can't reach Steam.
+  close_steam "SteamCMD signs in as you, which would sign the Steam app out"
   say "Downloading your Windows copy (app 1966720) as $STEAM_USER; SteamCMD will ask for your password / Steam Guard"
   "$LMC_CACHE/steamcmd/steamcmd.sh" +@sSteamCmdForcePlatformType windows +force_install_dir "$GAME" \
     +login "$STEAM_USER" +app_update 1966720 validate +quit
@@ -123,6 +135,7 @@ STAMP="game=$GAME_ID converter=$CONV_ID"
 STAMP_FILE="$OUT_APP/Contents/Resources/converter-stamp.txt"
 if [ -z "$FORCE" ] && [ "$(cat "$STAMP_FILE" 2>/dev/null)" = "$STAMP" ]; then
   say "$OUT_APP is up to date ($GAME_ID). Nothing to do."
+  add_steam_tile
   install_update_check
   exit 0
 fi
@@ -172,14 +185,7 @@ codesign --force --deep -s - "$NEW_APP"
 rm -rf "$OUT_APP"
 mv "$NEW_APP" "$OUT_APP"
 
-# --- 7. a tile in your Steam library (optional) ----------------------------------------------------------
-if [ -n "$STEAM_TILE" ] && [ -d "$HOME/Library/Application Support/Steam/userdata" ]; then
-  if pgrep -x steam_osx >/dev/null; then
-    echo "To add it to your Steam library: quit Steam, then run"
-    echo "  python3 -I \"$HERE/scripts/steam_shortcut.py\" --app \"$OUT_APP\""
-  else
-    python3 -I "$HERE/scripts/steam_shortcut.py" --app "$OUT_APP" || echo "(could not add the Steam library tile)"
-  fi
-fi
+# --- 7. Steam library entry and daily update check ---------------------------------------------------------
+add_steam_tile
 install_update_check
 say "Done: $OUT_APP"
