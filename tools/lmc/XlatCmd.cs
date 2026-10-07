@@ -43,7 +43,8 @@ static class XlatCmd
                                 var desc = par.ToDesc();
                                 if (Environment.GetEnvironmentVariable("LMC_XLAT_DEBUG") != null) { File.WriteAllText(Path.Combine(outDir, tag + ".desc"), desc); File.WriteAllBytes(Path.Combine(outDir, tag + ".dxbc"), Xlat.Dxbc(sub.Code)); }
                                 var (good, msl, refl) = Xlat.Translate(Xlat.Dxbc(sub.Code), desc, flags);
-                                File.WriteAllText(Path.Combine(outDir, tag + ".metal"), msl + "\n/* reflection\n" + refl + "*/\n/* desc\n" + desc + "*/\n");
+                                if (!good || Environment.GetEnvironmentVariable("LMC_XLAT_WRITE") != null)
+                                    File.WriteAllText(Path.Combine(outDir, tag + ".metal"), msl + "\n/* reflection\n" + refl + "*/\n/* desc\n" + desc + "*/\n");
                                 if (good) ok++; else { fail++; log.AppendLine($"{tag}: {refl.Split('\n').FirstOrDefault(l => l.StartsWith("error"))}"); }
                             }
                             catch (Exception e) { fail++; log.AppendLine($"{tag}: {e.Message}"); }

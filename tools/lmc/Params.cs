@@ -117,16 +117,17 @@ sealed class Params
         return p;
     }
 
-    // Unity's encoding of an inline sampler state -> a sampler name HLSLcc recognises as that inline sampler.
-    // Only the states this game uses are known; anything else must fail loudly rather than sample wrongly.
-    static readonly Dictionary<uint, string> InlineSamplers = new()
+    // Unity's inline sampler state: bits 0-1 filter (point/linear/trilinear), then 2 bits each for wrap U, V, W
+    // (repeat/clamp/mirror/mirroronce), bit 8 depth compare. HLSLcc turns a sampler *name* containing those
+    // words into the matching constexpr sampler, as Unity's own Metal compile does.
+    public static string InlineSamplerName(uint state)
     {
-        [1] = "s_linear_repeat_sampler",
-        [54] = "s_point_clamp_sampler",
-        [55] = "s_linear_clamp_sampler",
-        [56] = "s_trilinear_clamp_sampler",
-        [155] = "s_linear_clamp_compare_sampler",
-    };
+        if (state >> 9 != 0 || (state & 3) == 3) throw new Exception($"unsupported inline sampler state 0x{state:x}");
+        string[] filters = { "point", "linear", "trilinear" }, wraps = { "repeat", "clamp", "mirror", "mirroronce" };
+        uint u = (state >> 2) & 3, v = (state >> 4) & 3, w = (state >> 6) & 3;
+        var wrap = u == v && v == w ? wraps[u] : $"{wraps[u]}u_{wraps[v]}v_{wraps[w]}w";
+        return $"s_{filters[state & 3]}_{wrap}{((state & 0x100) != 0 ? "_compare" : "")}_sampler";
+    }
 
     // Description text for xlat's RDEF rebuild (record formats in tools/xlat/rdef.cpp).
     public string ToDesc()
@@ -150,7 +151,7 @@ sealed class Params
         foreach (var b in Buffers) Line("t", b.Index, b.Name);
         foreach (var u in Uavs) Line("u", u.Index, u.Name);
         foreach (var s in Samplers)
-            Line("s", s.Bind, InlineSamplers.TryGetValue(s.State, out var n) ? n : throw new Exception($"unknown inline sampler state {s.State}"));
+            Line("s", s.Bind, InlineSamplerName(s.State));
         foreach (var t in Textures.Where(t => t.Sampler >= 0 && Samplers.All(s => s.Bind != t.Sampler)).GroupBy(t => t.Sampler))
             Line("s", t.Key, "sampler" + t.First().Name);
         return sb.ToString();

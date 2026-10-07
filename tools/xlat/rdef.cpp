@@ -168,8 +168,10 @@ std::vector<uint8_t> Build(const Desc &desc, const std::vector<Decl> &decls, uin
     std::vector<Cb> cbs;
     auto name = [](const std::map<uint32_t, std::string> &m, uint32_t reg, const char *what) {
         auto it = m.find(reg);
-        if (it == m.end()) throw std::runtime_error(std::string("no name for ") + what + std::to_string(reg));
-        return it->second;
+        if (it != m.end()) return it->second;
+        // Pixel-shader UAVs are Unity "random write targets", bound by register, so Unity keeps no name for them.
+        if (what[0] == 'u') return "_RandomWriteTarget" + std::to_string(reg);
+        throw std::runtime_error(std::string("no name for ") + what + std::to_string(reg));
     };
     for (const Decl &d : decls)
     {
