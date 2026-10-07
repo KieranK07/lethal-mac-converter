@@ -103,6 +103,8 @@ fi
 say "Translating shaders (several minutes)"
 DATA="$LMC_CACHE/data"; rm -rf "$DATA"; mkdir -p "$DATA"
 dotnet "$LMC_CACHE/tools/lmc.dll" metalize "$GAME/Lethal Company_Data" "$DATA"
+say "Adding Unity's macOS video shader (from Unity's Mac editor pkg)"
+python3 -I "$HERE/scripts/video_shader.py" --unity-pkg-cache "$LMC_CACHE/unity" --lmc "$LMC_CACHE/tools/lmc.dll" --data "$DATA"
 
 # --- 5. Unity's Input System, compiled for macOS (controllers) ----------------------------------------
 # The game's Windows compile lacks the macOS gamepad layouts (Xbox over HID/Bluetooth, Nimbus+). Same package

@@ -32,7 +32,7 @@ sealed class DataDir : IDisposable
         return false;
     }
 
-    static string Tpk() => Path.Combine(Environment.GetEnvironmentVariable("LMC_CACHE") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library/Caches/lethal-mac-converter"), "classdata.tpk");
+    internal static string Tpk() => Path.Combine(Environment.GetEnvironmentVariable("LMC_CACHE") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library/Caches/lethal-mac-converter"), "classdata.tpk");
 
     public AssetTypeValueField Base(string file, long pid)
     {

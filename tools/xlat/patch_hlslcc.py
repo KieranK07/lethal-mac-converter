@@ -18,6 +18,9 @@ Each change mirrors what Unity 2022.3's own Metal shaders contain:
      buffers after its own buffers, and reads `tessFactor = tessFactors[patchID]`;
    - the domain stage's SV_TessFactor / SV_InsideTessFactor inputs read that `tessFactor`, as in the hull;
    - scalar control point inputs lose their `.x` where Unity's do (domain; hull with a control point phase).
+7. Stencil reads take the first channel. A D3D stencil view (X24_G8 / X32_G8X24) has the stencil in .y, and
+   the D3D bytecode reads .y; Unity's Metal stencil view has it in .x, and Unity's own Metal shaders read .x
+   (Core RP's GetStencilValue). Applies to uint textures whose name contains "Stencil" (HDRP's _StencilTexture).
 """
 import pathlib
 import sys
@@ -180,4 +183,16 @@ patch("toMetalDeclaration.cpp",
       '            if (iNumComponents == 1 && ((psOperand->eType == OPERAND_TYPE_INPUT_CONTROL_POINT && psShader->eShaderType == DOMAIN_SHADER) ||\n'
       '                                        (psOperand->eType == OPERAND_TYPE_INPUT && psShader->eShaderType == HULL_SHADER)))\n'
       '                psShader->abScalarInput[regSpace][ui32Reg] |= (int)ui32CompMask;\n')
+# 7. stencil channel
+patch("toMetalInstruction.cpp",
+      '    bcatcstr(glsl, ")");\n\n'
+      '    glsl << TranslateOperandSwizzle(&psInst->asOperands[2], psInst->asOperands[0].GetAccessMask(), 0);',
+      '    bcatcstr(glsl, ")");\n\n'
+      '    Operand resource = psInst->asOperands[2];\n'
+      '    if (psBinding->name.find("Stencil") != std::string::npos &&\n'
+      '        psContext->psShader->sInfo.GetTextureDataType(resource.ui32RegisterNumber) == SVT_UINT)\n'
+      '        for (int c = 0; c < 4; c++)\n'
+      '            if (resource.aui32Swizzle[c] == OPERAND_4_COMPONENT_Y) resource.aui32Swizzle[c] = OPERAND_4_COMPONENT_X;\n'
+      '    glsl << TranslateOperandSwizzle(&resource, psInst->asOperands[0].GetAccessMask(), 0);', 2)  # texel fetch, with and without offset
+
 print("HLSLcc patched for Unity 2022.3 Metal conventions")

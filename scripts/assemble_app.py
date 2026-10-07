@@ -33,6 +33,10 @@ ENTRY = 'Source/Player/MacPlayer/MacPlayerEntryPoint/'
 SUPPORT_WANT = (PLAYER, 'Variations/mono/Managed/', 'MonoBleedingEdge/etc/', ENTRY + 'Info.plist',
                 ENTRY + 'Resources/MainMenu.nib/', 'Tools/XCode/PrivacyInfo.xcprivacy')
 BCL_DIR = 'Unity/Unity.app/Contents/MonoBleedingEdge/lib/mono/unityjit-macos/'
+# The editor's built-in shaders (editor format, = the Windows editor's file). The same stream passes it on the way to
+# BCL_DIR. tools/lmc `videoosx` builds Hidden/VideoDecodeOSX for the Mac player from it.
+EDITOR_EXTRA = 'Unity/Unity.app/Contents/Resources/unity_builtin_extra'
+EDITOR_EXTRA_SHA256 = 'dc68c206c4c672d025a1f8555cb3396d3eb061ec1ac1dd91755f4f6eebabf5b7'
 # sha256 of the macOS class libraries the game uses (unityjit-macos, Unity 2022.3.62f2 Mac editor).
 # A game DLL that has a unityjit-macos namesake but no pin here stops the run: add it after checking.
 BCL_SHA256 = {
@@ -189,12 +193,16 @@ def unity_files(cache):
         open(os.path.join(support, '.complete'), 'w').close()
         os.remove(pkg)  # the Mac disk is tight: keep only the ~37 MB we use
         print(f'extracted {n} files from {SUPPORT_PKG} (pkg deleted)')
-    if not os.path.exists(os.path.join(editor, '.complete')):
-        print('streaming the macOS Mono class libraries out of the Unity Mac editor pkg (stops after ~0.8 GB)')
+    extra = os.path.join(editor, EDITOR_EXTRA)
+    if not os.path.exists(os.path.join(editor, '.complete')) or not os.path.exists(extra):
+        print('streaming the macOS Mono class libraries and the built-in shaders out of the Unity Mac editor pkg (~4 GB)')
         shutil.rmtree(editor, ignore_errors=True)
-        n = len(extract(EDITOR_URL, (BCL_DIR,), editor, stop_after=BCL_DIR))
-        if not n:
-            die('unityjit-macos not found in the editor pkg')
+        got = extract(EDITOR_URL, (BCL_DIR, EDITOR_EXTRA), editor, stop_after=BCL_DIR)
+        n = sum(p.startswith(BCL_DIR) for p in got)
+        if not n or EDITOR_EXTRA not in got:
+            die('unityjit-macos or unity_builtin_extra not found in the editor pkg')
+        if sha256(extra) != EDITOR_EXTRA_SHA256:
+            die(f'{EDITOR_EXTRA}: sha256 mismatch')
         open(os.path.join(editor, '.complete'), 'w').close()
         print(f'extracted {n} class-library files')
     return support, editor

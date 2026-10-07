@@ -14,7 +14,7 @@ Hash sources (md5 unless noted):
 | Source | Files | How the converter gets it |
 |---|---|---|
 | Unity Mac Mono support pkg | player executable, 4 dylibs, `unity default resources`, `MainMenu.nib`, Mono `etc/` (19), Info.plist template, PrivacyInfo, 67 `UnityEngine*.dll` | Download 552 MB, check sha256, stream-extract 96 files (37 MB), delete the pkg |
-| Unity Mac editor pkg | 22 Mono class libraries (`unityjit-macos`) | Stream the Payload, stop right after `MonoBleedingEdge/lib/mono/unityjit-macos/` (~1 min 50 s, 43 MB kept). Each file is sha256-pinned |
+| Unity Mac editor pkg | 22 Mono class libraries (`unityjit-macos`); the editor's `Resources/unity_builtin_extra` (source of `Hidden/VideoDecodeOSX`) | Stream the Payload, stop right after `MonoBleedingEdge/lib/mono/unityjit-macos/` (~1 min 50 s). The builtin_extra (148 MB, kept) sits at ~4.0 GB of the 4.5 GB Payload, before the class libraries, so the same stream picks it up. Each file is sha256-pinned |
 | User's Windows game | all Data files, 77 Managed DLLs | Clone (`cp -c`) |
 | Patched data (transplant + shader stage) | 41 serialized files, `Resources/unity_builtin_extra` | `--data` overlay |
 | Ours | 5 native plugins, `Facepunch.Steamworks.Win64.dll` (POSIX build) | `--plugins` |
@@ -49,7 +49,7 @@ Hash sources (md5 unless noted):
 |---|---|---|
 | 33 `*.resS`, 14 `*.resource`, `app.info`, `StreamingAssets/UnityServicesProjectConfiguration.json`, `UnitySubsystems/UnityOpenXR/UnitySubsystemsManifest.json` | game, unchanged | 50 files md5-equal to the game |
 | `globalgamemanagers`, `globalgamemanagers.assets`, `level0`–`level18`, `resources.assets`, `sharedassets0–18.assets` (41) | **transplant** (`--data`): the game's file with the platform byte 19→2, Metal shader objects, object table | Differ from the game by design; same sizes for the untouched ones |
-| `Resources/unity_builtin_extra` | **shader stage** (`--data`): Metal built-ins | LCPort `732000` B; game's is the D3D one (620,500 B) |
+| `Resources/unity_builtin_extra` | **shader stage** (`--data`): Metal built-ins, plus `Hidden/VideoDecodeOSX` (pathID 16002, `scripts/video_shader.py`) | LCPort `732000` B; game's is the D3D one (620,500 B). The Windows build strips 16002 although its ScriptMapper names it; the Mac player looks it up for video. It is GLSL-only, so for Metal Unity writes it with no programs. Built from the editor pkg's copy; byte-identical to the hybrid's object (sha256 `f96a737d…`) |
 | `boot.config` | **generated**: the game's minus one line (§4) | — |
 | `ScriptingAssemblies.json`, `RuntimeInitializeOnLoads.json` | the game's, **verbatim** (§4) | — |
 | `Managed/*.dll` (167) | see §5 | — |
