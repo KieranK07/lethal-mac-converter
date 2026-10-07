@@ -16,7 +16,8 @@ if [ "${1:-}" = uninstall ]; then
 fi
 APP=${1:?usage: update_check.sh <app> | uninstall}
 
-LATEST=$("$CACHE/steamcmd/steamcmd.sh" +login anonymous +app_info_update 1 +app_info_print 1966720 +quit 2>/dev/null |
+mkdir -p "$CACHE/steamcmd-home"  # SteamCMD's own home, as in convert.sh: keeps it out of the Steam app's folder
+LATEST=$(HOME="$CACHE/steamcmd-home" "$CACHE/steamcmd/steamcmd.sh" +login anonymous +app_info_update 1 +app_info_print 1966720 +quit 2>/dev/null |
   awk '/"branches"/ {b=1} b && /"public"/ {p=1} p && /"buildid"/ {gsub(/"/, "", $2); print $2; exit}')
 [ -n "$LATEST" ] || exit 0  # offline or Steam down: try again next time
 

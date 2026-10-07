@@ -146,7 +146,7 @@ switch (cmd)
         CbDiff.Run(args[1], args[2]);
         break;
     case "metalize":
-        return Metalize.Run(args[1], args[2]);
+        return Metalize.Run(args[1], args[2], args.Length > 3 ? args[3] : null);
     case "info":
     {
         using var d = new DataDir(args[1]);

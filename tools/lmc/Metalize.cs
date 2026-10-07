@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 
@@ -7,12 +8,26 @@ namespace Lmc;
 // The shader stage of the converter: writes every serialized file of the game's Data folder with the
 // platform set to macOS, each D3D11 shader replaced by its Metal translation, and the two graphics settings
 // the player reads to pick Metal.
+// With a cache dir, each translated object is kept under a hash of the game's original object and of this
+// tool's binaries, so a re-run (or a game update) only translates shaders that are new or changed.
 static class Metalize
 {
-    public static int Run(string gameData, string outDir)
+    public static int Run(string gameData, string outDir, string? cacheDir = null)
     {
         using var d = new DataDir(gameData);
         var problems = new List<string>();
+        var cache = cacheDir == null ? null : new ObjectCache(cacheDir);
+        byte[] Cached(AssetsFileInstance inst, AssetFileInfo info, Func<byte[]> make)
+        {
+            if (cache == null) return make();
+            inst.file.Reader.Position = info.GetAbsoluteByteOffset(inst.file);
+            var key = cache.Key(inst.file.Reader.ReadBytes((int)info.ByteSize));
+            if (cache.TryGet(key, out var hit)) return hit;
+            var before = problems.Count;
+            var bytes = make();
+            if (problems.Count == before) cache.Put(key, bytes);
+            return bytes;
+        }
         var sw = Stopwatch.StartNew();
         int shaders = 0, computes = 0;
         var only = Environment.GetEnvironmentVariable("LMC_ONLY")?.Split('|'); // dev: translate just these names
@@ -24,13 +39,13 @@ static class Metalize
                 var bf = d.Am.GetBaseField(inst, info);
                 var s = new ShaderRef(key, info.PathId, bf["m_ParsedForm"]["m_Name"].AsString, new());
                 if (only != null && !only.Contains(s.Name)) continue;
-                try { repl[info.PathId] = NeedsGeometry(bf) ? NoPrograms(bf) : MetalShader.Convert(d, s, problems); shaders++; }
+                try { repl[info.PathId] = Cached(inst, info, () => NeedsGeometry(bf) ? NoPrograms(bf) : MetalShader.Convert(d, s, problems)); shaders++; }
                 catch (Exception e) { problems.Add($"{key}:{info.PathId} {s.Name}: {e.Message}"); }
             }
             foreach (var info in inst.file.GetAssetsOfType(AssetClassID.ComputeShader))
             {
                 if (only != null && !only.Contains(d.Am.GetBaseField(inst, info)["m_Name"].AsString)) continue;
-                try { repl[info.PathId] = MetalCompute.Convert(d, inst, info); computes++; }
+                try { repl[info.PathId] = Cached(inst, info, () => MetalCompute.Convert(d, inst, info)); computes++; }
                 catch (Exception e) { problems.Add($"{key}:{info.PathId} compute: {e.Message}"); }
             }
             if (key == "globalgamemanagers") PatchGraphicsSettings(d, inst, repl);
@@ -39,7 +54,8 @@ static class Metalize
             File.WriteAllBytes(outPath, SerializedWriter.WriteSerialized(inst, repl, SerializedWriter.StandaloneOSX));
             Console.WriteLine($"{key}: {repl.Count} objects replaced ({sw.Elapsed.TotalSeconds:F0}s)");
         }
-        Console.WriteLine($"{shaders} shaders and {computes} compute shaders translated, {problems.Count} problems, {sw.Elapsed.TotalSeconds:F0}s");
+        if (cache != null && only == null && problems.Count == 0) cache.Prune();  // keep just this game version's set
+        Console.WriteLine($"{shaders} shaders and {computes} compute shaders done ({(cache == null ? "no cache" : $"{cache.Hits} reused, {cache.Misses} translated")}), {problems.Count} problems, {sw.Elapsed.TotalSeconds:F0}s");
         foreach (var p in problems) Console.WriteLine("  " + p);
         return problems.Count == 0 ? 0 : 1;
     }
@@ -92,5 +108,50 @@ static class Metalize
             w[1].AsUInt = 8;
         }
         repl[gs.PathId] = g.WriteToByteArray();
+    }
+}
+
+// Translated objects on disk, keyed by sha256(tool binaries, original object bytes).
+sealed class ObjectCache
+{
+    readonly string dir;
+    readonly byte[] version;
+    readonly HashSet<string> used = new();
+    public int Hits, Misses;
+
+    public ObjectCache(string dir)
+    {
+        this.dir = dir;
+        Directory.CreateDirectory(dir);
+        // any change to lmc, AssetsTools or the translator library gives every object a new key
+        using var h = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var f in Directory.GetFiles(AppContext.BaseDirectory).Where(f => f.EndsWith(".dll") || f.EndsWith(".dylib")).Order())
+            h.AppendData(File.ReadAllBytes(f));
+        version = h.GetHashAndReset();
+    }
+
+    public string Key(byte[] original) => Convert.ToHexStringLower(SHA256.HashData(version.Concat(original).ToArray()));
+
+    public bool TryGet(string key, out byte[] bytes)
+    {
+        var path = Path.Combine(dir, key + ".bin");
+        used.Add(key);
+        if (File.Exists(path)) { bytes = File.ReadAllBytes(path); Hits++; return true; }
+        bytes = Array.Empty<byte>();
+        Misses++;
+        return false;
+    }
+
+    public void Put(string key, byte[] bytes)
+    {
+        var tmp = Path.Combine(dir, key + ".tmp");
+        File.WriteAllBytes(tmp, bytes);
+        File.Move(tmp, Path.Combine(dir, key + ".bin"), true);
+    }
+
+    public void Prune()
+    {
+        foreach (var f in Directory.GetFiles(dir))
+            if (!used.Contains(Path.GetFileNameWithoutExtension(f))) File.Delete(f);
     }
 }

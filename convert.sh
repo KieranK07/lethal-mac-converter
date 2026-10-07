@@ -41,6 +41,20 @@ need_steamcmd() {  # Valve's SteamCMD for macOS, an Intel binary (Rosetta)
     curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_osx.tar.gz | tar -xz -C "$LMC_CACHE/steamcmd"
   fi
 }
+# Hash of the files under these paths (build outputs and tests left out): decides what needs rebuilding.
+srchash() {
+  (cd "$HERE" && find "$@" -type f ! -path '*/out/*' ! -path '*/bin/*' ! -path '*/obj/*' ! -path '*/test/*' \
+    ! -name '*.pyc' ! -name '.DS_Store' -print0 | sort -z | xargs -0 shasum) | shasum | cut -c1-16
+}
+# SteamCMD with its own home folder: sharing the Steam app's, its saved login was wiped whenever Steam started.
+steamcmd() {
+  mkdir -p "$LMC_CACHE/steamcmd-home"
+  HOME="$LMC_CACHE/steamcmd-home" "$LMC_CACHE/steamcmd/steamcmd.sh" "$@"
+}
+latest_build() {  # the public build id, asked anonymously (no login, so the Steam app isn't signed out)
+  steamcmd +login anonymous +app_info_update 1 +app_info_print 1966720 +quit 2>/dev/null |
+    awk '/"branches"/ {b=1} b && /"public"/ {p=1} p && /"buildid"/ {gsub(/"/, "", $2); print $2; exit}'
+}
 # Steam keeps shortcuts.vdf in memory and writes it back on exit, so it must be closed while we add the
 # library entry; and SteamCMD signing in as you signs the Steam app out. Close it once; reopen it on exit.
 close_steam() {  # $1: why
@@ -109,15 +123,31 @@ if [ -z "$GAME" ] && [ -z "$STEAM_USER" ]; then
     [ -n "$STEAM_USER" ] || die "no Steam login given"
   fi
 fi
+# Which converter built the app: only the files that shape it count, so changes to e.g. the Steam entry or
+# the update check never force a rebuild.
+CONV_ID=$(srchash tools native scripts/assemble_app.py scripts/build_inputsystem.py scripts/video_shader.py)
+STAMP_FILE="$OUT_APP/Contents/Resources/converter-stamp.txt"
+up_to_date() {
+  say "$OUT_APP is up to date ($1). Nothing to do."
+  add_steam_tile
+  install_update_check
+  exit 0
+}
 if [ -n "$STEAM_USER" ]; then
-  need_steamcmd  # the real-login download is still untested end to end
+  need_steamcmd
   GAME="$LMC_CACHE/game"
+  # Already built from the current Steam build? Then no login at all.
+  if [ -z "$FORCE" ] && [ -f "$GAME/steamapps/appmanifest_1966720.acf" ]; then
+    LATEST=$(latest_build)
+    [ -n "$LATEST" ] && [ "$(cat "$STAMP_FILE" 2>/dev/null)" = "game=steam-$LATEST converter=$CONV_ID" ] && up_to_date "steam-$LATEST"
+  fi
   # SteamCMD signing in as you replaces the Steam app's session ("Session Replaced"), and the app doesn't
   # reconnect by itself, so games then can't reach Steam.
   close_steam "SteamCMD signs in as you, which would sign the Steam app out"
-  say "Downloading your Windows copy (app 1966720) as $STEAM_USER; SteamCMD will ask for your password / Steam Guard"
-  "$LMC_CACHE/steamcmd/steamcmd.sh" +@sSteamCmdForcePlatformType windows +force_install_dir "$GAME" \
-    +login "$STEAM_USER" +app_update 1966720 validate +quit
+  say "Getting your Windows copy (app 1966720) as $STEAM_USER; the first time, SteamCMD asks for your password / Steam Guard"
+  CHECK=validate  # check every file only on the first download; after that Steam sends just what changed
+  [ -f "$GAME/steamapps/appmanifest_1966720.acf" ] && CHECK=
+  steamcmd +@sSteamCmdForcePlatformType windows +force_install_dir "$GAME" +login "$STEAM_USER" +app_update 1966720 $CHECK +quit
   echo "$STEAM_USER" > "$LMC_CACHE/steam-user"
 fi
 [ -n "$GAME" ] || die "pass --game <Windows install folder> or --steam-user <Steam login>"
@@ -129,21 +159,19 @@ UNITY=$(head -c 4096 "$GAME/Lethal Company_Data/globalgamemanagers" | LC_ALL=C g
 ACF="$GAME/steamapps/appmanifest_1966720.acf"
 if [ -f "$ACF" ]; then GAME_ID="steam-$(sed -n 's/.*"buildid"[[:space:]]*"\([0-9]*\)".*/\1/p' "$ACF" | head -1)"
 else GAME_ID="files-$(cd "$GAME" && find . -type f -print0 | sort -z | xargs -0 stat -f '%N %z %m' | shasum | cut -c1-16)"; fi
-CONV_ID=$(cd "$HERE" && find convert.sh tools scripts native -type f ! -path '*/out/*' ! -path '*/bin/*' ! -path '*/obj/*' ! -name '*.pyc' -print0 \
-  | sort -z | xargs -0 cat | shasum | cut -c1-16)
 STAMP="game=$GAME_ID converter=$CONV_ID"
-STAMP_FILE="$OUT_APP/Contents/Resources/converter-stamp.txt"
-if [ -z "$FORCE" ] && [ "$(cat "$STAMP_FILE" 2>/dev/null)" = "$STAMP" ]; then
-  say "$OUT_APP is up to date ($GAME_ID). Nothing to do."
-  add_steam_tile
-  install_update_check
-  exit 0
-fi
+[ -z "$FORCE" ] && [ "$(cat "$STAMP_FILE" 2>/dev/null)" = "$STAMP" ] && up_to_date "$GAME_ID"
 
 # --- 3. native libraries, built from source ------------------------------------------------------------
 PLUGINS="$LMC_CACHE/plugins"; rm -rf "$PLUGINS"; mkdir -p "$PLUGINS"
-say "Building the Steam layer";  sh "$HERE/native/steam/build.sh"
-say "Building voice chat";       sh "$HERE/native/voice/build.sh"
+for part in steam voice; do  # rebuilt only when their sources changed
+  ID=$(srchash "native/$part")
+  if [ "$(cat "$HERE/native/$part/out/.built-from" 2>/dev/null)" != "$ID" ]; then
+    say "Building the $part library"
+    sh "$HERE/native/$part/build.sh"
+    echo "$ID" > "$HERE/native/$part/out/.built-from"
+  fi
+done
 cp "$HERE/native/steam/out/"* "$HERE/native/voice/out/"* "$PLUGINS/"
 say "Fetching Discord's Game SDK 3.2.1 (official download)"
 DZ="$LMC_CACHE/discord_game_sdk-3.2.1.zip"
@@ -152,8 +180,12 @@ echo "6757bb4a1f5b42aa7b6707cbf2158420278760ac5d80d40ca708bb01d20ae6b4  $DZ" | s
 unzip -o -q -j "$DZ" lib/aarch64/discord_game_sdk.dylib -d "$PLUGINS"
 
 # --- 4. shaders: translate the game's Direct3D shaders to Metal -----------------------------------------
-say "Building the shader translator"
-OUT="$LMC_CACHE/tools" sh "$HERE/tools/xlat/build.sh"
+ID=$(srchash tools/xlat)
+if [ "$(cat "$LMC_CACHE/tools/.xlat-from" 2>/dev/null)" != "$ID" ] || [ ! -f "$LMC_CACHE/tools/libxlat.dylib" ]; then
+  say "Building the shader translator"
+  OUT="$LMC_CACHE/tools" sh "$HERE/tools/xlat/build.sh"
+  echo "$ID" > "$LMC_CACHE/tools/.xlat-from"
+fi
 dotnet build "$HERE/tools/lmc/lmc.csproj" -c Release -v q -nologo -o "$LMC_CACHE/tools" >/dev/null
 if [ ! -f "$LMC_CACHE/classdata.tpk" ]; then
   # Unity's class layouts for AssetsTools.NET, from the UABEA v8 release (MIT)
@@ -161,9 +193,9 @@ if [ ! -f "$LMC_CACHE/classdata.tpk" ]; then
   echo "c542dd3b5b091b34645ee1c7180df7138f9f3fe5253222f151d7185e542402b2  $LMC_CACHE/uabea.zip" | shasum -a 256 -c - >/dev/null || die "UABEA checksum mismatch"
   unzip -o -q -j "$LMC_CACHE/uabea.zip" classdata.tpk -d "$LMC_CACHE" && rm "$LMC_CACHE/uabea.zip"
 fi
-say "Translating shaders (several minutes)"
+say "Translating shaders (about 8 min the first time; afterwards only new or changed shaders)"
 DATA="$LMC_CACHE/data"; rm -rf "$DATA"; mkdir -p "$DATA"
-dotnet "$LMC_CACHE/tools/lmc.dll" metalize "$GAME/Lethal Company_Data" "$DATA"
+dotnet "$LMC_CACHE/tools/lmc.dll" metalize "$GAME/Lethal Company_Data" "$DATA" "$LMC_CACHE/metal-cache"
 say "Adding Unity's macOS video shader (from Unity's Mac editor pkg)"
 python3 -I "$HERE/scripts/video_shader.py" --unity-pkg-cache "$LMC_CACHE/unity" --lmc "$LMC_CACHE/tools/lmc.dll" --data "$DATA"
 
