@@ -21,7 +21,7 @@ Nothing from the game is ever shipped. Not affiliated with Zeekerss, Unity, Valv
    - your Steam login name
    - SteamCMD's password / Steam Guard prompt
 4. Wait. The first run takes about 30–40 min, most of it translating shaders.
-5. Play `~/Applications/Lethal Company.app`. If Steam is installed and closed, it also gets a tile in your Steam library.
+5. Press **Play on Lethal Company in your Steam library**. The converter sets this up by briefly closing Steam: it marks the game installed and points its launch option at the Mac app. Playtime, friends' status, invites and the Steam overlay (Shift+Tab) all work as the real game. Steam may show a harmless "32-bit" warning.
 
 ## Updating
 

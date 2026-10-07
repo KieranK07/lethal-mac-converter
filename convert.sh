@@ -64,19 +64,30 @@ close_steam() {  # $1: why
   for _ in $(seq 60); do pgrep -x steam_osx >/dev/null || break; sleep 1; done
   trap 'open -a Steam' EXIT
 }
-# "Lethal Company" in your Steam library, launching this app: the way to get the Steam overlay (Shift+Tab),
-# since Steam only injects it into games it starts. Uses the real game's artwork from Steam's cache.
+# Steam's own Lethal Company entry plays this app: Play, playtime, presence, invites and the overlay all
+# work as the real game. Needs the SteamCMD install (its appmanifest) to register as installed; a copied
+# install (--game without one) gets a separate library entry instead, where the overlay doesn't survive.
 add_steam_tile() {
   [ -n "$STEAM_TILE" ] && [ -d "$HOME/Library/Application Support/Steam/userdata" ] || return 0
-  python3 -I "$HERE/scripts/steam_shortcut.py" --app "$OUT_APP" --check && return 0
-  close_steam "to add Lethal Company to your library"
-  python3 -I "$HERE/scripts/steam_shortcut.py" --app "$OUT_APP" || echo "(could not add the Steam library entry)"
+  S="$HERE/scripts"
+  if [ -f "$GAME/steamapps/appmanifest_1966720.acf" ]; then
+    python3 -I "$S/steam_appinfo.py" --check && python3 -I "$S/steam_launch.py" --app "$OUT_APP" --game "$GAME" --check \
+      && ! python3 -I "$S/steam_shortcut.py" --app "$OUT_APP" --check && return 0
+    close_steam "to make Play on Lethal Company in your library start the Mac app"
+    python3 -I "$S/steam_appinfo.py" || echo "(could not enable Play for Lethal Company in Steam)"
+    python3 -I "$S/steam_launch.py" --app "$OUT_APP" --game "$GAME" || echo "(could not set Lethal Company's launch options)"
+    python3 -I "$S/steam_shortcut.py" --app "$OUT_APP" --remove || true  # the old separate entry, if any
+  else
+    python3 -I "$S/steam_shortcut.py" --app "$OUT_APP" --check && return 0
+    close_steam "to add Lethal Company to your library"
+    python3 -I "$S/steam_shortcut.py" --app "$OUT_APP" || echo "(could not add the Steam library entry)"
+  fi
 }
 # A LaunchAgent that checks Steam once a day (and at login) and notifies when the game has updated.
 install_update_check() {
   [ -n "$UPDATE_CHECK" ] || return 0
   ( need_steamcmd ) || { echo "(skipping the daily update check: no SteamCMD)"; return 0; }
-  cp "$HERE/scripts/update_check.sh" "$LMC_CACHE/update_check.sh"
+  cp "$HERE/scripts/update_check.sh" "$HERE/scripts/steam_appinfo.py" "$LMC_CACHE/"
   PL="$HOME/Library/LaunchAgents/com.lethal-mac-converter.update-check.plist"
   mkdir -p "$HOME/Library/LaunchAgents"
   python3 -I -c 'import plistlib, sys; plistlib.dump({"Label": "com.lethal-mac-converter.update-check",

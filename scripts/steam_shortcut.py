@@ -85,6 +85,22 @@ def copy_art(grid, appid):
     shutil.copyfile(icons[0], os.path.join(grid, f'{uid}_icon.jpg'))
     return os.path.join(grid, f'{uid}_icon.jpg')
 
+def remove(vdf_path, app, name):
+    exe = f'"{executable(app)}"'
+    shortcuts = shortcuts_of(vdf_path)
+    gone = [k for k, v in shortcuts.items() if v.get('AppName') == name and v.get('Exe') == exe]
+    if not gone:
+        return
+    grid = os.path.join(os.path.dirname(vdf_path), 'grid')
+    for k in gone:
+        uid = shortcuts[k]['appid'] & 0xffffffff
+        for f in glob.glob(os.path.join(grid, f'{uid}*')):
+            os.remove(f)
+    kept = [v for k, v in shortcuts.items() if k not in gone]
+    shutil.copy2(vdf_path, vdf_path + '.bak')
+    open(vdf_path, 'wb').write(write_vdf({'shortcuts': {str(i): v for i, v in enumerate(kept)}}))
+    print(f'{vdf_path}: removed "{name}"')
+
 def add(vdf_path, app, name):
     shortcuts = shortcuts_of(vdf_path)
     exe = f'"{executable(app)}"'
@@ -107,6 +123,7 @@ def main():
     ap.add_argument('--name', default='Lethal Company')
     ap.add_argument('--vdf', help='one shortcuts.vdf to edit (default: every Steam account on this Mac)')
     ap.add_argument('--check', action='store_true', help='exit 0 if the tile is already there, 1 if not')
+    ap.add_argument('--remove', action='store_true', help='remove the tile (and its artwork)')
     a = ap.parse_args()
     a.app = os.path.abspath(a.app.rstrip('/'))
     # numeric folders only: SteamCMD's anonymous logins leave a userdata/anonymous behind
@@ -117,7 +134,7 @@ def main():
     if not a.vdf and subprocess.run(['pgrep', '-x', 'steam_osx'], capture_output=True).returncode == 0:
         sys.exit('Quit Steam first (it overwrites shortcuts.vdf when it exits), then run this again.')
     if not vdfs: sys.exit('No Steam account found on this Mac; log in to Steam once first.')
-    for v in vdfs: add(v, a.app, a.name)
+    for v in vdfs: (remove if a.remove else add)(v, a.app, a.name)
 
 if __name__ == '__main__':
     main()
