@@ -95,6 +95,14 @@ fi
 if [ -n "$STEAM_USER" ]; then
   need_steamcmd  # the real-login download is still untested end to end
   GAME="$LMC_CACHE/game"
+  # SteamCMD signing in as you replaces the Steam app's session ("Session Replaced"), and the app doesn't
+  # reconnect by itself, so games then can't reach Steam. Close Steam now and reopen it when we finish.
+  if pgrep -x steam_osx >/dev/null; then
+    say "Closing Steam while your copy downloads (it would be signed out anyway); it reopens at the end"
+    osascript -e 'quit app "Steam"' >/dev/null 2>&1 || true
+    for _ in $(seq 60); do pgrep -x steam_osx >/dev/null || break; sleep 1; done
+    trap 'open -a Steam' EXIT
+  fi
   say "Downloading your Windows copy (app 1966720) as $STEAM_USER; SteamCMD will ask for your password / Steam Guard"
   "$LMC_CACHE/steamcmd/steamcmd.sh" +@sSteamCmdForcePlatformType windows +force_install_dir "$GAME" \
     +login "$STEAM_USER" +app_update 1966720 validate +quit
