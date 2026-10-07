@@ -1,0 +1,8 @@
+# cache and outputs are built on the user's machine, never committed
+/cache/
+/out/
+*.dylib
+*.dll
+*.app/
+bin/
+obj/
