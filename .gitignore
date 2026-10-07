@@ -10,3 +10,13 @@ obj/
 # test audio is generated locally (macOS `say`), not committed
 native/voice/test/speech.wav
 __pycache__/
+# never commit game, Unity or build outputs (they are made on the user's machine)
+*.icns
+*.ico
+*.png
+*.assets
+*.resS
+*.resource
+*.bin
+*.metal
+*.exe
