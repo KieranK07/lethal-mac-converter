@@ -6,7 +6,7 @@
 #   ./convert.sh --game "/path/to/Lethal Company"        # use an existing Windows install instead
 #   ./convert.sh --steam-user <your Steam login name>
 #   options: --out "<path>.app" (default ~/Applications/Lethal Company.app), --no-steam-tile,
-#            --force (rebuild even if the app is already up to date)
+#            --force (rebuild even if the app is already up to date), --no-update-check
 #
 # Updating: run it again after Lethal Company updates. It downloads only what changed, and rebuilds only when
 # the game or this converter changed (about 10 min); otherwise it says the app is up to date. Saves and settings
@@ -18,7 +18,7 @@ set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 export LMC_CACHE="${LMC_CACHE:-$HOME/Library/Caches/lethal-mac-converter}"
 OUT_APP="$HOME/Applications/Lethal Company.app"
-GAME= STEAM_USER= STEAM_TILE=1 FORCE=
+GAME= STEAM_USER= STEAM_TILE=1 FORCE= UPDATE_CHECK=1
 while [ $# -gt 0 ]; do
   case $1 in
     --game) GAME=$2; shift 2 ;;
@@ -26,12 +26,36 @@ while [ $# -gt 0 ]; do
     --out) OUT_APP=$2; shift 2 ;;
     --no-steam-tile) STEAM_TILE=; shift ;;
     --force) FORCE=1; shift ;;
+    --no-update-check) UPDATE_CHECK=; shift ;;
     *) echo "unknown option $1"; exit 2 ;;
   esac
 done
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 mkdir -p "$LMC_CACHE"
+need_steamcmd() {  # Valve's SteamCMD for macOS, an Intel binary (Rosetta)
+  arch -x86_64 /usr/bin/true 2>/dev/null || die "SteamCMD needs Rosetta: softwareupdate --install-rosetta --agree-to-license"
+  if [ ! -x "$LMC_CACHE/steamcmd/steamcmd.sh" ]; then
+    say "Downloading Valve's SteamCMD"
+    mkdir -p "$LMC_CACHE/steamcmd"
+    curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_osx.tar.gz | tar -xz -C "$LMC_CACHE/steamcmd"
+  fi
+}
+# A LaunchAgent that checks Steam once a day (and at login) and notifies when the game has updated.
+install_update_check() {
+  [ -n "$UPDATE_CHECK" ] || return 0
+  ( need_steamcmd ) || { echo "(skipping the daily update check: no SteamCMD)"; return 0; }
+  cp "$HERE/scripts/update_check.sh" "$LMC_CACHE/update_check.sh"
+  PL="$HOME/Library/LaunchAgents/com.lethal-mac-converter.update-check.plist"
+  mkdir -p "$HOME/Library/LaunchAgents"
+  python3 -I -c 'import plistlib, sys; plistlib.dump({"Label": "com.lethal-mac-converter.update-check",
+    "ProgramArguments": ["/bin/sh", sys.argv[1], sys.argv[2]], "RunAtLoad": True,
+    "StartCalendarInterval": {"Hour": 12, "Minute": 0}, "ProcessType": "Background"}, open(sys.argv[3], "wb"))' \
+    "$LMC_CACHE/update_check.sh" "$OUT_APP" "$PL"
+  launchctl bootout "gui/$(id -u)" "$PL" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$PL"
+  echo "Daily update check on (turn off: sh \"$LMC_CACHE/update_check.sh\" uninstall)"
+}
 
 # --- 0. requirements -----------------------------------------------------------------------------------
 [ "$(uname -m)" = arm64 ] || die "this converter builds for Apple Silicon Macs only"
@@ -69,13 +93,7 @@ if [ -z "$GAME" ] && [ -z "$STEAM_USER" ]; then
   fi
 fi
 if [ -n "$STEAM_USER" ]; then
-  # UNTESTED end to end: needs a real login. SteamCMD for macOS is an Intel binary (Rosetta).
-  arch -x86_64 /usr/bin/true 2>/dev/null || die "SteamCMD needs Rosetta: softwareupdate --install-rosetta --agree-to-license"
-  if [ ! -x "$LMC_CACHE/steamcmd/steamcmd.sh" ]; then
-    say "Downloading Valve's SteamCMD"
-    mkdir -p "$LMC_CACHE/steamcmd"
-    curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_osx.tar.gz | tar -xz -C "$LMC_CACHE/steamcmd"
-  fi
+  need_steamcmd  # the real-login download is still untested end to end
   GAME="$LMC_CACHE/game"
   say "Downloading your Windows copy (app 1966720) as $STEAM_USER; SteamCMD will ask for your password / Steam Guard"
   "$LMC_CACHE/steamcmd/steamcmd.sh" +@sSteamCmdForcePlatformType windows +force_install_dir "$GAME" \
@@ -97,6 +115,7 @@ STAMP="game=$GAME_ID converter=$CONV_ID"
 STAMP_FILE="$OUT_APP/Contents/Resources/converter-stamp.txt"
 if [ -z "$FORCE" ] && [ "$(cat "$STAMP_FILE" 2>/dev/null)" = "$STAMP" ]; then
   say "$OUT_APP is up to date ($GAME_ID). Nothing to do."
+  install_update_check
   exit 0
 fi
 
@@ -154,4 +173,5 @@ if [ -n "$STEAM_TILE" ] && [ -d "$HOME/Library/Application Support/Steam/userdat
     python3 -I "$HERE/scripts/steam_shortcut.py" --app "$OUT_APP" || echo "(could not add the Steam library tile)"
   fi
 fi
+install_update_check
 say "Done: $OUT_APP"
