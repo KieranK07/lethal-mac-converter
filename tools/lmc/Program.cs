@@ -5,6 +5,7 @@ using Lmc;
 // lmc: lethal-mac-converter's data tool. Dev commands while the shader translator is being built:
 //   ls   <data dir>                         list Shader objects (file, pathID, name, platforms)
 //   dump <data dir> <shader name> <out dir> write every blob entry of the shader's first platform
+//   objdiff <data dir A> <data dir B>        per serialized file: objects whose bytes differ, by class
 var cmd = args.Length > 0 ? args[0] : "";
 switch (cmd)
 {
@@ -43,6 +44,18 @@ switch (cmd)
             }
         break;
     }
+    case "cbnames":
+    {
+        using var d = new DataDir(args[1]);
+        foreach (var (key, inst) in d.Files)
+            foreach (var info in inst.file.GetAssetsOfType(AssetClassID.ComputeShader))
+            {
+                var bf = d.Am.GetBaseField(inst, info);
+                var names = bf["variants"]["Array"].Children.SelectMany(v => v["constantBuffers"]["Array"].Children.Select(c => c["name"].AsString)).Distinct();
+                Console.WriteLine($"{key}:{info.PathId}\t{bf["m_Name"].AsString}\t{string.Join(",", names)}");
+            }
+        break;
+    }
     case "cdump":
     {
         using var d = new DataDir(args[1]);
@@ -73,6 +86,34 @@ switch (cmd)
                 }
                 return 0;
             }
+        break;
+    }
+    case "objdiff":
+    {
+        using var a = new DataDir(args[1]);
+        using var b = new DataDir(args[2]);
+        static byte[] Raw(AssetsFileInstance inst, AssetFileInfo info)
+        {
+            inst.file.Reader.Position = info.GetAbsoluteByteOffset(inst.file);
+            return inst.file.Reader.ReadBytes((int)info.ByteSize);
+        }
+        foreach (var name in a.Files.Keys.Union(b.Files.Keys).Order())
+        {
+            if (!a.Files.TryGetValue(name, out var fa) || !b.Files.TryGetValue(name, out var fb)) { Console.WriteLine($"{name}: only in {(fa == null ? "B" : "A")}"); continue; }
+            var ib = fb.file.AssetInfos.ToDictionary(i => i.PathId);
+            var diff = new Dictionary<string, int>();
+            int same = 0;
+            void Count(string what) => diff[what] = diff.GetValueOrDefault(what) + 1;
+            foreach (var ia in fa.file.AssetInfos)
+            {
+                if (!ib.Remove(ia.PathId, out var other)) Count($"only-A {(AssetClassID)ia.TypeId}");
+                else if (ia.TypeId != other.TypeId) Count($"type {(AssetClassID)ia.TypeId}->{(AssetClassID)other.TypeId}");
+                else if (Raw(fa, ia).AsSpan().SequenceEqual(Raw(fb, other))) same++;
+                else Count($"{(AssetClassID)ia.TypeId}");
+            }
+            foreach (var o in ib.Values) Count($"only-B {(AssetClassID)o.TypeId}");
+            Console.WriteLine($"{name}: {same} identical" + string.Concat(diff.OrderBy(kv => kv.Key).Select(kv => $", {kv.Value} {kv.Key}")));
+        }
         break;
     }
     case "metalize":

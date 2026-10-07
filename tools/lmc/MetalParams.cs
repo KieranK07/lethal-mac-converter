@@ -70,7 +70,7 @@ static class MetalParams
                     var (size, align) = Layout(rows, cols, matrix, arr);
                     off = Round(off, align);
                     maxAlign = Math.Max(maxAlign, align);
-                    cur!.Values.Add(new Value(l[1], UnityType(svt, l[1]), rows, cols, matrix, arr, off));
+                    if (!l[1].StartsWith(CbLayouts.PadPrefix)) cur!.Values.Add(new Value(l[1], UnityType(svt, l[1]), rows, cols, matrix, arr, off));
                     off += size;
                     break;
                 }

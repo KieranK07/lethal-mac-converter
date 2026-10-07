@@ -33,7 +33,8 @@ static class MetalShader
 
         // Pass 1: collect the unique (code, parameters) pairs per program; pass 2 translates them in parallel
         // (HLSLcc keeps no global state); pass 3 writes the results back in a fixed order.
-        var jobs = new List<(string tag, SubProgram sub, string desc)>();
+        var jobs = new List<(string tag, SubProgram sub, Params par)>();
+        var layouts = new CbLayouts(compute: false);
         var sites = new List<(AssetTypeValueField sp, AssetTypeValueField par, int job)>();
         var commons = new List<AssetTypeValueField>();
         foreach (var ss in bf["m_ParsedForm"]["m_SubShaders"]["Array"].Children)
@@ -59,7 +60,8 @@ static class MetalShader
                                 var sub = SubProgram.Read(blob.Entry((int)key.Item1));
                                 var par = Params.FromBlob(blob.Entry((int)key.Item2)).Merge(common);
                                 seen[key] = job = jobs.Count;
-                                jobs.Add(($"{s.Name}.{prog}.{key.Item1}", sub, par.ToDesc()));
+                                par.AddTo(layouts);
+                                jobs.Add(($"{s.Name}.{prog}.{key.Item1}", sub, par));
                             }
                             sites.Add((sp, parIdx[o]["Array"][i], job));
                         }
@@ -68,11 +70,12 @@ static class MetalShader
                 }
             }
 
+        layouts.Freeze(); // decide every layout before the parallel part reads them
         var results = new MetalProgram[jobs.Count];
         Parallel.For(0, jobs.Count, j =>
         {
-            var (tag, sub, desc) = jobs[j];
-            var (ok, msl, refl) = Xlat.Translate(Xlat.Dxbc(sub.Code), desc, HlslccFlags);
+            var (tag, sub, par) = jobs[j];
+            var (ok, msl, refl) = Xlat.Translate(Xlat.Dxbc(sub.Code), par.ToDesc(layouts), HlslccFlags);
             if (!ok) throw new Exception($"{tag}: {refl.Split('\n').FirstOrDefault(l => l.StartsWith("error"))}");
             Dump.Msl(tag, msl);
             results[j] = MetalProgram.From(sub, msl, refl);

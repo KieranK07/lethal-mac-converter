@@ -120,25 +120,35 @@ sealed class Params
     // Unity's inline sampler state: bits 0-1 filter (point/linear/trilinear), then 2 bits each for wrap U, V, W
     // (repeat/clamp/mirror/mirroronce), bit 8 depth compare. HLSLcc turns a sampler *name* containing those
     // words into the matching constexpr sampler, as Unity's own Metal compile does.
-    public static string InlineSamplerName(uint state)
+    // Two registers can carry the same state (e.g. s_point_clamp_sampler and sampler_PointClamp in the source);
+    // `used` keeps their Metal names apart, since HLSLcc declares one constexpr sampler per register.
+    public static string InlineSamplerName(uint state, HashSet<string> used)
     {
         if (state >> 9 != 0 || (state & 3) == 3) throw new Exception($"unsupported inline sampler state 0x{state:x}");
         string[] filters = { "point", "linear", "trilinear" }, wraps = { "repeat", "clamp", "mirror", "mirroronce" };
         uint u = (state >> 2) & 3, v = (state >> 4) & 3, w = (state >> 6) & 3;
         var wrap = u == v && v == w ? wraps[u] : $"{wraps[u]}u_{wraps[v]}v_{wraps[w]}w";
-        return $"s_{filters[state & 3]}_{wrap}{((state & 0x100) != 0 ? "_compare" : "")}_sampler";
+        var name = $"s_{filters[state & 3]}_{wrap}{((state & 0x100) != 0 ? "_compare" : "")}_sampler";
+        return used.Add(name) ? name : $"{name}_{used.Count}";
     }
 
     // Description text for xlat's RDEF rebuild (record formats in tools/xlat/rdef.cpp).
-    public string ToDesc()
+    // Feed this program's cbuffers into the shader-wide layout decision (cbuffers holding structs keep their own).
+    public void AddTo(CbLayouts layouts)
+    {
+        foreach (var cb in Cbs.Where(c => c.Structs.Count == 0 && c.Name != "")) layouts.Add(cb.Name, cb.Size, cb.Params);
+    }
+
+    public string ToDesc(CbLayouts layouts)
     {
         var sb = new StringBuilder();
         void Line(params object[] f) => sb.Append(string.Join('\t', f)).Append('\n');
         foreach (var b in CbBinds)
         {
             var cb = Cbs.FirstOrDefault(c => c.Name == b.Name) ?? throw new Exception($"cbuffer binding '{b.Name}' has no layout");
-            Line("cb", b.Index, cb.Name, cb.Size);
-            foreach (var v in cb.Params) Line(VarRecord("v", b.Index, v));
+            var (size, vars) = cb.Structs.Count == 0 ? layouts.Get(cb.Name, cb.Size, cb.Params) : (cb.Size, cb.Params);
+            Line("cb", b.Index, cb.Name, size);
+            foreach (var v in vars) Line(VarRecord("v", b.Index, v));
             foreach (var s in cb.Structs)
             {
                 Line("v", b.Index, s.Name, s.Index, 5, 0, 0, 0, s.Array);
@@ -150,17 +160,18 @@ sealed class Params
         foreach (var t in Textures) Line("t", t.Index, t.Name);
         foreach (var b in Buffers) Line("t", b.Index, b.Name);
         foreach (var u in Uavs) Line("u", u.Index, u.Name);
+        var used = new HashSet<string>();
         foreach (var s in Samplers)
-            Line("s", s.Bind, InlineSamplerName(s.State));
+            Line("s", s.Bind, InlineSamplerName(s.State, used));
         foreach (var t in Textures.Where(t => t.Sampler >= 0 && Samplers.All(s => s.Bind != t.Sampler)).GroupBy(t => t.Sampler))
             Line("s", t.Key, "sampler" + t.First().Name);
         return sb.ToString();
     }
 
     // Unity type 0 = float, 1 = int (uint is reported as int too); D3D classes: 0 scalar, 1 vector, 3 matrix (column-major).
-    static string VarRecord(string kind, int reg, Param v)
+    public static string VarRecord(string kind, int reg, Param v)
     {
-        var svt = v.Type switch { 0 => 3, 1 => 2, 2 => 1, _ => throw new Exception($"param type {v.Type} ({v.Name})") };
+        var svt = v.Type switch { 0 => 3, 1 => 2, 2 => 1, 5 => 19, _ => throw new Exception($"param type {v.Type} ({v.Name})") };
         var cls = v.Matrix ? 3 : v.Cols > 1 ? 1 : 0;
         return string.Join('\t', kind, reg, v.Name, v.Index, cls, svt, v.Rows, v.Cols, v.Array);
     }

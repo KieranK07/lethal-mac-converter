@@ -1,8 +1,10 @@
 #!/bin/sh
 # Turn your own Windows copy of Lethal Company into a native Apple Silicon app.
 #
-#   ./convert.sh --game "/path/to/Lethal Company"        # an existing Windows install (folder with Lethal Company_Data)
-#   ./convert.sh --steam-user <your Steam login name>    # download your copy's Windows files with Valve's SteamCMD
+#   double-click "Convert Lethal Company.command", or ./convert.sh with no options: asks for your Steam login
+#     once and downloads your copy with Valve's SteamCMD
+#   ./convert.sh --game "/path/to/Lethal Company"        # use an existing Windows install instead
+#   ./convert.sh --steam-user <your Steam login name>
 #   options: --out "<path>.app" (default ~/Applications/Lethal Company.app)
 #
 # Nothing from the game, Unity or Valve is in this repository. Everything is downloaded from its official
@@ -52,6 +54,14 @@ TERMS
 fi
 
 # --- 2. your Windows game files ------------------------------------------------------------------------
+if [ -z "$GAME" ] && [ -z "$STEAM_USER" ]; then
+  STEAM_USER=$(cat "$LMC_CACHE/steam-user" 2>/dev/null || true)
+  if [ -z "$STEAM_USER" ]; then
+    printf '\nYour Steam login name (the one you sign in with, not your profile name): '
+    read -r STEAM_USER
+    [ -n "$STEAM_USER" ] || die "no Steam login given"
+  fi
+fi
 if [ -n "$STEAM_USER" ]; then
   # UNTESTED end to end: needs a real login. SteamCMD for macOS is an Intel binary (Rosetta).
   arch -x86_64 /usr/bin/true 2>/dev/null || die "SteamCMD needs Rosetta: softwareupdate --install-rosetta --agree-to-license"
@@ -64,6 +74,7 @@ if [ -n "$STEAM_USER" ]; then
   say "Downloading your Windows copy (app 1966720) as $STEAM_USER; SteamCMD will ask for your password / Steam Guard"
   "$LMC_CACHE/steamcmd/steamcmd.sh" +@sSteamCmdForcePlatformType windows +force_install_dir "$GAME" \
     +login "$STEAM_USER" +app_update 1966720 validate +quit
+  echo "$STEAM_USER" > "$LMC_CACHE/steam-user"
 fi
 [ -n "$GAME" ] || die "pass --game <Windows install folder> or --steam-user <Steam login>"
 [ -d "$GAME/Lethal Company_Data" ] || die "no 'Lethal Company_Data' in $GAME"
@@ -93,9 +104,26 @@ say "Translating shaders (several minutes)"
 DATA="$LMC_CACHE/data"; rm -rf "$DATA"; mkdir -p "$DATA"
 "$LMC_CACHE/tools/lmc" metalize "$GAME/Lethal Company_Data" "$DATA"
 
-# --- 5. assemble and sign the app ----------------------------------------------------------------------
+# --- 5. Unity's Input System, compiled for macOS (controllers) ----------------------------------------
+# The game's Windows compile lacks the macOS gamepad layouts (Xbox over HID/Bluetooth, Nimbus+). Same package
+# version from Unity's registry, built the way Unity builds it for a Mac player; it overrides the game's DLL.
+say "Compiling Unity's Input System for macOS"
+python3 -I "$HERE/scripts/build_inputsystem.py" --game "$GAME" --unity-pkg-cache "$LMC_CACHE/unity" \
+  --out "$PLUGINS/Unity.InputSystem.dll"
+
+# --- 6. assemble and sign the app ----------------------------------------------------------------------
 say "Assembling $OUT_APP"
 python3 -I "$HERE/scripts/assemble_app.py" --game "$GAME" --unity-pkg-cache "$LMC_CACHE/unity" \
   --plugins "$PLUGINS" --data "$DATA" --out "$OUT_APP"
 codesign --force --deep -s - "$OUT_APP"
+
+# --- 7. a tile in your Steam library (optional) ----------------------------------------------------------
+if [ -d "$HOME/Library/Application Support/Steam/userdata" ]; then
+  if pgrep -x steam_osx >/dev/null; then
+    echo "To add it to your Steam library: quit Steam, then run"
+    echo "  python3 -I \"$HERE/scripts/steam_shortcut.py\" --app \"$OUT_APP\""
+  else
+    python3 -I "$HERE/scripts/steam_shortcut.py" --app "$OUT_APP" || echo "(could not add the Steam library tile)"
+  fi
+fi
 say "Done: $OUT_APP"

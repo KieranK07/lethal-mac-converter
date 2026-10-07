@@ -9,6 +9,9 @@ Each change mirrors what Unity 2022.3's own Metal shaders contain:
 2. Vertex positions are `[[ position, invariant ]]`. HDRP's depth prepass followed by ZTest Equal relies on this.
 3. Base vertex/instance are subtracted only when the player sets `has_base_vertex_instance`
    (`function_constant(4)`).
+4. Multisampled texture arrays are read as `tex.read(coord.xy, coord.z, sample)`.
+5. SV_PrimitiveID in pixel shaders becomes `[[ primitive_id ]]`. Unity's Metal build compiles HDRP's
+   debug-display variants without it; ours come from the D3D variant, which reads it.
 """
 import pathlib
 import sys
@@ -69,4 +72,37 @@ patch("toMetal.cpp",
       "                    break;\n"
       "                }\n"
       "        DeclareClipPlanes(&psShader->asPhases[0].psDecl[0], psShader->asPhases[0].psDecl.size());")
+# 4. multisampled texture arrays
+patch("toMetalInstruction.cpp",
+      '            psContext->m_Reflection.OnDiagnostics("Multisampled texture arrays not supported in Metal (in texel fetch)", 0, true);\n'
+      '            return;',
+      '            glsl << TranslateOperand(&psInst->asOperands[1], TO_FLAG_UNSIGNED_INTEGER | TO_AUTO_EXPAND_TO_VEC2, 3 /* .xy */);\n'
+      '            if (psInst->bAddressOffset)\n'
+      '                bformata(glsl, " + uint2(int2(%d, %d))", psInst->iUAddrOffset, psInst->iVAddrOffset);\n'
+      '            bcatcstr(glsl, ", ");\n'
+      '            glsl << TranslateOperand(&psInst->asOperands[1], TO_FLAG_UNSIGNED_INTEGER, OPERAND_4_COMPONENT_MASK_Z); // Array index\n'
+      '            bcatcstr(glsl, ", ");\n'
+      '            glsl << TranslateOperand(&psInst->asOperands[3], TO_FLAG_UNSIGNED_INTEGER, OPERAND_4_COMPONENT_MASK_X); // Sample index\n'
+      '            break;', 2)  # with and without an address offset
+
+# 5. primitive id
+patch("toMetalDeclaration.cpp",
+      '            case NAME_SAMPLE_INDEX:\n                result = "mtl_SampleID";',
+      '            case NAME_PRIMITIVE_ID:\n'
+      '                result = "mtl_PrimitiveID";\n'
+      '                if (outSkipPrefix != NULL) *outSkipPrefix = true;\n'
+      '                if (pui32IgnoreSwizzle)\n'
+      '                    *pui32IgnoreSwizzle = 1;\n'
+      '                return true;\n'
+      '            case NAME_SAMPLE_INDEX:\n                result = "mtl_SampleID";')
+patch("toMetalDeclaration.cpp",
+      '[[ base_vertex, function_constant(has_base_vertex_instance) ]]")); // Requires Metal runtime 1.1+\n'
+      '            break;\n'
+      '        case NAME_PRIMITIVE_ID:\n'
+      '            // Not on Metal\n'
+      '            ASSERT(0);',
+      '[[ base_vertex, function_constant(has_base_vertex_instance) ]]")); // Requires Metal runtime 1.1+\n'
+      '            break;\n'
+      '        case NAME_PRIMITIVE_ID:\n'
+      '            m_StructDefinitions[""].m_Members.push_back(std::make_pair("mtl_PrimitiveID", "uint mtl_PrimitiveID [[ primitive_id ]]"));')
 print("HLSLcc patched for Unity 2022.3 Metal conventions")

@@ -15,6 +15,7 @@ static class Metalize
         var problems = new List<string>();
         var sw = Stopwatch.StartNew();
         int shaders = 0, computes = 0;
+        var only = Environment.GetEnvironmentVariable("LMC_ONLY")?.Split('|'); // dev: translate just these names
         foreach (var (key, inst) in d.Files)
         {
             var repl = new Dictionary<long, byte[]>();
@@ -22,11 +23,13 @@ static class Metalize
             {
                 var bf = d.Am.GetBaseField(inst, info);
                 var s = new ShaderRef(key, info.PathId, bf["m_ParsedForm"]["m_Name"].AsString, new());
+                if (only != null && !only.Contains(s.Name)) continue;
                 try { repl[info.PathId] = MetalShader.Convert(d, s, problems); shaders++; }
                 catch (Exception e) { problems.Add($"{key}:{info.PathId} {s.Name}: {e.Message}"); }
             }
             foreach (var info in inst.file.GetAssetsOfType(AssetClassID.ComputeShader))
             {
+                if (only != null && !only.Contains(d.Am.GetBaseField(inst, info)["m_Name"].AsString)) continue;
                 try { repl[info.PathId] = MetalCompute.Convert(d, inst, info); computes++; }
                 catch (Exception e) { problems.Add($"{key}:{info.PathId} compute: {e.Message}"); }
             }

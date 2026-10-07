@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstring>
 #include <map>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -85,6 +86,7 @@ static size_t OperandLength(const uint32_t *op)
 std::vector<Decl> ScanDecls(const uint32_t *shex, uint32_t &version)
 {
     std::vector<Decl> out;
+    std::set<uint32_t> counted;  // UAVs used by imm_atomic_alloc/consume: Append/ConsumeStructuredBuffers
     version = shex[0];  // program type << 16 | major << 4 | minor
     const uint32_t total = shex[1];
     for (uint32_t i = 2; i < total;)
@@ -112,10 +114,13 @@ std::vector<Decl> ScanDecls(const uint32_t *shex, uint32_t &version)
         case 0x9e:
             d.kind = K_UAV_STRUCT; d.reg = OperandRegister(o); d.stride = o[OperandLength(o)]; d.counter = (tok >> 23) & 1;
             out.push_back(d); break;
+        case 0xb2: case 0xb3: counted.insert(OperandRegister(o + OperandLength(o))); break;  // dest, then the UAV
         default: break;
         }
         i += len;
     }
+    for (Decl &d : out)
+        if (d.kind == K_UAV_STRUCT && counted.count(d.reg)) d.counter = 1;
     return out;
 }
 

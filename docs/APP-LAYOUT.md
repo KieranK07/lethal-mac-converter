@@ -96,6 +96,7 @@ The four package DLLs with a platform `#if`:
   - `UNITY_STANDALONE_OSX` adds `OSXSupport.Initialize()` (Nimbus+ gamepad), `XboxGamepadMacOS`, `XboxOneGampadMacOSWireless` and `XboxGamepadMacOSWireless` (HID layouts).
   - `UNITY_STANDALONE_WIN` adds `XInputControllerWindows` and 4 extra Switch Pro HID matchers.
   - Keyboard and mouse code is identical.
+  - **Converter:** rebuilt for macOS from source (§7). Against Unity's Mac build: identical decompile, identical IL, identical type/member/attribute sets. The one missing type is `UnitySourceGeneratedAssemblyMonoScriptTypes_v1` (editor-only source-path table; nothing in the Mac player or engine modules names it). All 264 references from Assembly-CSharp, RenderPipelines.Core, VFX Graph, XR.CoreUtils and XR.OpenXR resolve.
 - **`Unity.Networking.Transport`:** `UnsafeBaselibNetworkArray`. Windows registers one page allocation per packet slot (RIO), Mac one contiguous block. On a Mac the Windows version costs about capacity × 16 KB of memory but works the same way on Baselib's POSIX emulation.
 - **`UnityEngine.UI`:** `MultipleDisplayUtilities.RelativeMouseAtScaled` returns `(x, y, displayIndex)` on Windows, `Display.RelativeMouseAt(pos)` elsewhere. The two only differ on multi-monitor setups.
 
@@ -135,7 +136,7 @@ The four package DLLs with a platform `#if`:
 | Mono class libraries | the Windows build P/Invokes `kernel32`/`BCrypt` (test F) | Unity editor pkg, Range-streamed, pinned |
 | HDRP | `ENABLE_NVIDIA` (tests B, C) | **5-byte IL patch** of the game's DLL, sha256-checked in and out (`d1985d5a…` → `3b2912d5…`), plus the game's `UnityEngine.NVIDIAModule.dll`. Nothing Unity-compiled is shipped. A game update that changes HDRP stops the script |
 | Facepunch.Steamworks | `Pack=8` vs `Pack=4` on 195 structs, `steam_api64` vs `libsteam_api` | our MIT build (ship it) |
-| InputSystem (optional) | Windows build has no macOS Xbox/Nimbus+ HID layouts, so Xbox pads on Mac aren't recognised as gamepads. Keyboard and mouse are unaffected | **not needed for boot.** For pad parity, either:<br>• ship our own tiny assembly that registers the three Xbox HID layouts as JSON via `InputSystem.RegisterLayout(json)`, listed in ScriptingAssemblies + RIOL (all our code, ~0 risk)<br>• compile `com.unity.inputsystem` from packages.unity.com at convert time with `UNITY_STANDALONE_OSX`. This needs Roslyn and a .NET host from the editor pkg; heavier |
+| InputSystem | Windows build has no macOS Xbox/Nimbus+ HID layouts, so Xbox pads on Mac aren't recognised as gamepads. Keyboard and mouse are unaffected | **`scripts/build_inputsystem.py`** compiles `com.unity.inputsystem` 1.14.0 from packages.unity.com at convert time (sha256-pinned) with Roslyn 4.3.1 (Unity's compiler, NuGet), Microsoft's netstandard 2.1 ref (byte-identical to Unity's) and the pkg's Mac engine modules, using the 115 defines from Unity's own Mac player `.rsp`. Output is deterministic and pinned (`fe17b192…`); it goes to `--plugins` and overrides the game's DLL |
 
 **Ruled out:**
 - The pkg contains no package DLLs: only engine modules, under `Variations/mono/Managed/`.

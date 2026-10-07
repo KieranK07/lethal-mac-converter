@@ -40,7 +40,9 @@ static class XlatCmd
                             var tag = $"{ssI}.{pI}.{prog}.{o}.{i}";
                             try
                             {
-                                var desc = par.ToDesc();
+                                var lay = new CbLayouts(compute: false);
+                                par.AddTo(lay);
+                                var desc = par.ToDesc(lay);
                                 if (Environment.GetEnvironmentVariable("LMC_XLAT_DEBUG") != null) { File.WriteAllText(Path.Combine(outDir, tag + ".desc"), desc); File.WriteAllBytes(Path.Combine(outDir, tag + ".dxbc"), Xlat.Dxbc(sub.Code)); }
                                 var (good, msl, refl) = Xlat.Translate(Xlat.Dxbc(sub.Code), desc, flags);
                                 if (!good || Environment.GetEnvironmentVariable("LMC_XLAT_WRITE") != null)

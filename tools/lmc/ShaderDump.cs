@@ -24,6 +24,7 @@ static class ShaderDump
             foreach (var p in ss["m_Passes"]["Array"].Children)
             {
                 m.AppendLine($"== pass {ssI}.{pI} '{p["m_Name"].AsString}' type {p["m_Type"].AsInt}");
+                var names = p["m_NameIndices"]["Array"].Children.ToDictionary(x => x["second"].AsInt, x => x["first"].AsString);
                 foreach (var prog in Progs)
                 {
                     var pg = p[prog];
@@ -41,18 +42,39 @@ static class ShaderDump
                             m.AppendLine($"  {prog}[{o}][{i}] gpu={sp["m_GpuProgramType"].AsSByte} blob={bi} params={pidx} req={sp["m_ShaderRequirements"].AsLong} kw=[{keys}]");
                             var file = $"{ssI}.{pI}.{prog}.{o}.{i}";
                             m.Append(SubProgram(blob.Entry(bi), Path.Combine(outDir, file)));
-                            if (pidx >= 0) m.Append(Params(blob.Entry(pidx)));
+                            if (pidx >= 0)
+                            {
+                                var pe = blob.Entry(pidx);
+                                File.WriteAllBytes(Path.Combine(outDir, file) + ".params", pe);
+                                m.Append(Params(pe));
+                            }
                         }
                     }
                     var common = pg["m_CommonParameters"];
-                    if (!common.IsDummy)
-                        m.AppendLine("    common: " + string.Join(" ", common.Children.Select(c => $"{c.FieldName}={(c["Array"].IsDummy ? "?" : c["Array"].Children.Count)}")));
+                    if (!common.IsDummy && common.Children.Any(c => c["Array"].Children.Count > 0))
+                    {
+                        m.AppendLine($"    {prog} common:");
+                        Common(common, names, "      ", m);
+                    }
                 }
                 pI++;
             }
             ssI++;
         }
         File.WriteAllText(Path.Combine(outDir, "manifest.txt"), m.ToString());
+    }
+
+    // m_CommonParameters, every list item on one line; m_NameIndex resolved through the pass's name table.
+    static void Common(AssetTypeValueField f, Dictionary<int, string> names, string ind, StringBuilder m)
+    {
+        foreach (var list in f.Children)
+            foreach (var item in list["Array"].Children)
+            {
+                var scalars = item.Children.Where(c => c.Children.Count == 0)
+                    .Select(c => c.FieldName == "m_NameIndex" ? $"'{names[c.AsInt]}'" : $"{c.FieldName.Replace("m_", "")}={c.AsString}");
+                m.AppendLine($"{ind}{list.FieldName.Replace("m_", "")}: {string.Join(" ", scalars)}");
+                Common(item, names, ind + "  ", m);
+            }
     }
 
     static string Str(BinaryReader r)

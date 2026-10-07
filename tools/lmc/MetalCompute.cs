@@ -29,6 +29,13 @@ static class MetalCompute
             A(cb["params"]).Select(p => new CbParam(p["name"].AsString, p["type"].AsInt, p["offset"].AsUInt, p["arraySize"].AsUInt, p["rowCount"].AsUInt, p["colCount"].AsUInt)).ToList())).ToList();
         var metalCbs = new List<CbEntry>();
         var cbKey = new Dictionary<string, int>();
+        var layouts = new CbLayouts(compute: true);
+        foreach (var k in A(v["kernels"]))
+            foreach (var uv in A(k["uniqueVariants"]))
+            {
+                var idx = A(uv["cbVariantIndices"]).Select(x => (int)x.AsUInt).ToList();
+                foreach (var cb in idx.Select(i => d3dCbs[i])) layouts.Add(cb.Name, cb.Size, cb.Params.Select(ToParam));
+            }
 
         foreach (var k in A(v["kernels"]))
             foreach (var uv in A(k["uniqueVariants"]))
@@ -36,7 +43,7 @@ static class MetalCompute
                 var cbIdx = A(uv["cbVariantIndices"]).Select(x => (int)x.AsUInt).ToList();
                 var cbs = A(uv["cbs"]).ToList();
                 var kcbs = cbs.Select((c, i) => d3dCbs[cbIdx[i]]).ToList();
-                var desc = Desc(uv, cbs, kcbs);
+                var desc = Desc(uv, cbs, kcbs, layouts);
                 var dxbc = uv["code"]["Array"].AsByteArray;
                 var (ok, msl, refl) = Xlat.Translate(dxbc, desc, HlslccFlags);
                 if (!ok) throw new Exception($"{name} {k["name"].AsString}: {refl.Split('\n').FirstOrDefault(l => l.StartsWith("error"))}");
@@ -49,7 +56,7 @@ static class MetalCompute
                 foreach (var c in cbs)
                 {
                     var src = kcbs[cbs.IndexOf(c)];
-                    var entry = MetalCb(lines, c["name"].AsString, src);
+                    var entry = MetalCb(lines, MetalName(c["name"].AsString), layouts.Get(src.Name, src.Size, src.Params.Select(ToParam)).vars);
                     var key = entry.Name + "|" + entry.Size + "|" + string.Join(";", entry.Params);
                     if (!cbKey.TryGetValue(key, out var idx)) { idx = metalCbs.Count; metalCbs.Add(entry); cbKey[key] = idx; }
                     newIdx.Add((uint)idx);
@@ -77,31 +84,33 @@ static class MetalCompute
         return ms.ToArray();
     }
 
-    static string Desc(AssetTypeValueField uv, List<AssetTypeValueField> cbs, List<CbEntry> kcbs)
+    // ComputeShaderParam (type: Unity ShaderParamType 0 float, 1 int, 2 bool, 5 uint) as a cbuffer value
+    static Param ToParam(CbParam p) => new(p.Name, p.Type, (int)p.Rows, (int)p.Cols, p.Rows > 1, (int)p.Array, (int)p.Offset);
+
+    static string Desc(AssetTypeValueField uv, List<AssetTypeValueField> cbs, List<CbEntry> kcbs, CbLayouts layouts)
     {
         var sb = new StringBuilder();
         void Line(params object[] f) => sb.Append(string.Join('\t', f)).Append('\n');
         for (var i = 0; i < cbs.Count; i++)
         {
-            var reg = cbs[i]["bindPoint"].AsInt;
-            Line("cb", reg, cbs[i]["name"].AsString, kcbs[i].Size);
-            foreach (var p in kcbs[i].Params)
-            {
-                // ComputeShaderParam: type 0 float, 1 int, 2 bool, 5 uint (Unity's ShaderParamType)
-                var svt = p.Type switch { 0 => 3, 1 => 2, 2 => 1, 5 => 19, _ => throw new Exception($"param {p.Name} type {p.Type}") };
-                var cls = p.Rows > 1 ? 3 : p.Cols > 1 ? 1 : 0;
-                Line("v", reg, p.Name, p.Offset, cls, svt, p.Rows, p.Cols, p.Array);
-            }
+            var c = cbs[i];
+            var reg = c["bindPoint"].AsInt;
+            var (size, vars) = layouts.Get(c["name"].AsString, kcbs[i].Size, kcbs[i].Params.Select(ToParam));
+            Line("cb", reg, c["name"].AsString, size);
+            foreach (var p in vars) sb.Append(Params.VarRecord("v", reg, p)).Append('\n');
         }
         foreach (var t in A(uv["textures"])) Line("t", t["bindPoint"].AsInt, t["name"].AsString);
         foreach (var b in A(uv["inBuffers"])) Line("t", b["bindPoint"].AsInt, b["name"].AsString);
         foreach (var b in A(uv["outBuffers"])) Line("u", b["bindPoint"].AsInt, b["name"].AsString);
         var inline = A(uv["builtinSamplers"]).ToList();
-        foreach (var s in inline) Line("s", s["bindPoint"].AsInt, Params.InlineSamplerName(s["sampler"].AsUInt));
+        var used = new HashSet<string>();
+        foreach (var s in inline) Line("s", s["bindPoint"].AsInt, Params.InlineSamplerName(s["sampler"].AsUInt, used));
         foreach (var g in A(uv["textures"]).Where(t => t["samplerBindPoint"].AsInt >= 0 && inline.All(s => s["bindPoint"].AsInt != t["samplerBindPoint"].AsInt)).GroupBy(t => t["samplerBindPoint"].AsInt))
             Line("s", g.Key, "sampler" + g.First()["name"].AsString);
         return sb.ToString();
     }
+
+    static string MetalName(string cb) => cb == "$Globals" ? "Globals" : cb;
 
     // Resource bind points -> the Metal slots HLSLcc assigned; inline samplers become constexpr samplers.
     static void Rebind(AssetTypeValueField uv, List<string[]> refl)
@@ -112,6 +121,7 @@ static class MetalCompute
         int Slot(AssetTypeValueField r)
         {
             var n = r["name"].AsString;
+            if (n == "$Globals") r["name"].AsString = n = MetalName(n); // HLSLcc (and Unity's Metal build) call it "Globals"
             if (tex.TryGetValue(n, out var t)) { r["samplerBindPoint"].AsInt = t.sampler; return t.bind; }
             if (buf.TryGetValue(n, out var b)) return b;
             if (cb.TryGetValue(n, out var c)) return c;
@@ -124,8 +134,9 @@ static class MetalCompute
         samplers.AsArray = new AssetTypeArrayInfo(0);
     }
 
-    // One cbuffer as HLSLcc declared it for this kernel. Compute rules: arrays and matrices are float4 arrays.
-    static CbEntry MetalCb(List<string[]> refl, string name, CbEntry d3d)
+    // One cbuffer as HLSLcc declared it for this kernel (the shader-wide layout; compute rules: arrays and
+    // matrices are float4 arrays). Padding members advance the offset but are not parameters.
+    static CbEntry MetalCb(List<string[]> refl, string name, List<Param> layout)
     {
         var start = refl.FindIndex(l => l[0] == "cb" && l[1] == name);
         if (start < 0) throw new Exception($"cbuffer {name} not in the Metal translation");
@@ -134,14 +145,12 @@ static class MetalCompute
         for (var i = start + 1; i < refl.Count && refl[i][0] == "const"; i++)
         {
             var l = refl[i];
-            var src = d3d.Params.FirstOrDefault(p => p.Name == l[1]) ?? throw new Exception($"{name}.{l[1]}: not in the D3D table");
-            int size, align;
-            if (src.Rows > 1) { size = 16 * (int)src.Cols * (int)Math.Max(src.Array, 1); align = 16; }
-            else if (src.Array > 1) { size = 16 * (int)src.Array; align = 16; }
-            else (size, align) = src.Cols switch { 1 => (4, 4), 2 => (8, 8), _ => (16, 16) };
+            var src = layout.FirstOrDefault(p => p.Name == l[1]) ?? throw new Exception($"{name}.{l[1]}: not in the layout");
+            var (size, align) = CbLayouts.Metal(src, compute: true);
             off = (off + align - 1) / align * align;
             maxAlign = Math.Max(maxAlign, align);
-            ps.Add(src with { Offset = (uint)off });
+            if (!src.Name.StartsWith(CbLayouts.PadPrefix))
+                ps.Add(new CbParam(src.Name, src.Type, (uint)off, (uint)src.Array, (uint)src.Rows, (uint)src.Cols));
             off += size;
         }
         return new CbEntry(name, (off + maxAlign - 1) / maxAlign * maxAlign, ps);
