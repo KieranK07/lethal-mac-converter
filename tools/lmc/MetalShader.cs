@@ -33,52 +33,64 @@ static class MetalShader
 
         // Pass 1: collect the unique (code, parameters) pairs per program; pass 2 translates them in parallel
         // (HLSLcc keeps no global state); pass 3 writes the results back in a fixed order.
-        var jobs = new List<(string tag, SubProgram sub, Params par)>();
+        // A tessellated pass has no hull or domain programs on Metal: subprogram i of the vertex, hull and domain
+        // lists (same keywords) becomes one Metal vertex program, docs/METAL-TESSELLATION.md.
+        var jobs = new List<(string tag, SubProgram[] subs, Params[] pars)>();
         var layouts = new CbLayouts(compute: false);
         var sites = new List<(AssetTypeValueField sp, AssetTypeValueField par, int job)>();
         var commons = new List<AssetTypeValueField>();
-        foreach (var ss in bf["m_ParsedForm"]["m_SubShaders"]["Array"].Children)
-            foreach (var p in ss["m_Passes"]["Array"].Children)
+        var tessLists = new List<AssetTypeValueField>();
+        var passes = bf["m_ParsedForm"]["m_SubShaders"]["Array"].Children.SelectMany(ss => ss["m_Passes"]["Array"].Children).ToList();
+        foreach (var p in passes)
+        {
+            var names = p["m_NameIndices"]["Array"].Children.ToDictionary(x => x["second"].AsInt, x => x["first"].AsString);
+            var tess = HasPrograms(p["progHull"]) || HasPrograms(p["progDomain"]);
+            foreach (var group in tess ? new[] { new[] { "progVertex", "progHull", "progDomain" } }.Concat(Progs.Except(TessProgs).Select(x => new[] { x })) : Progs.Select(x => new[] { x }))
             {
-                var names = p["m_NameIndices"]["Array"].Children.ToDictionary(x => x["second"].AsInt, x => x["first"].AsString);
-                foreach (var prog in Progs)
+                var pgs = group.Select(x => p[x]).ToArray();
+                var common = pgs.Select(pg => Params.FromCommon(pg["m_CommonParameters"], names)).ToArray();
+                var outer = pgs.Select(pg => pg["m_PlayerSubPrograms"]["Array"].Children).ToArray();
+                var parIdx = pgs.Select(pg => pg["m_ParameterBlobIndices"]["Array"].Children).ToArray();
+                var seen = new Dictionary<string, int>();
+                for (var o = 0; o < outer[0].Count; o++)
                 {
-                    var pg = p[prog];
-                    var common = Params.FromCommon(pg["m_CommonParameters"], names);
-                    var outer = pg["m_PlayerSubPrograms"]["Array"].Children;
-                    var parIdx = pg["m_ParameterBlobIndices"]["Array"].Children;
-                    var seen = new Dictionary<(uint, uint), int>();
-                    for (var o = 0; o < outer.Count; o++)
+                    var inner = outer.Select(x => x[o]["Array"].Children).ToArray();
+                    if (inner.Any(x => x.Count != inner[0].Count)) throw new Exception($"{s.Name}: tier {o} has {string.Join("/", inner.Select(x => x.Count))} vertex/hull/domain programs");
+                    for (var i = 0; i < inner[0].Count; i++)
                     {
-                        var inner = outer[o]["Array"].Children;
-                        for (var i = 0; i < inner.Count; i++)
+                        var sps = inner.Select(x => x[i]).ToArray();
+                        if (sps.Select(Keywords).Distinct().Count() != 1) throw new Exception($"{s.Name}: vertex/hull/domain program {i} differ in keywords");
+                        var keys = sps.Select((sp, k) => (blob: sp["m_BlobIndex"].AsUInt, par: parIdx[k][o]["Array"][i].AsUInt)).ToArray();
+                        var key = string.Join(";", keys);
+                        if (!seen.TryGetValue(key, out var job))
                         {
-                            var sp = inner[i];
-                            var key = (sp["m_BlobIndex"].AsUInt, parIdx[o]["Array"][i].AsUInt);
-                            if (!seen.TryGetValue(key, out var job))
-                            {
-                                var sub = SubProgram.Read(blob.Entry((int)key.Item1));
-                                var par = Params.FromBlob(blob.Entry((int)key.Item2)).Merge(common);
-                                seen[key] = job = jobs.Count;
-                                par.AddTo(layouts);
-                                jobs.Add(($"{s.Name}.{prog}.{key.Item1}", sub, par));
-                            }
-                            sites.Add((sp, parIdx[o]["Array"][i], job));
+                            var subs = keys.Select(k => SubProgram.Read(blob.Entry((int)k.blob))).ToArray();
+                            var pars = keys.Select((k, n) => Params.FromBlob(blob.Entry((int)k.par)).Merge(common[n])).ToArray();
+                            seen[key] = job = jobs.Count;
+                            foreach (var par in pars) par.AddTo(layouts);
+                            jobs.Add(($"{s.Name}.{string.Join("+", group)}.{string.Join(".", keys.Select(k => k.blob))}", subs, pars));
                         }
+                        sites.Add((sps[0], parIdx[0][o]["Array"][i], job));
                     }
-                    commons.Add(pg["m_CommonParameters"]);
                 }
+                foreach (var pg in pgs) commons.Add(pg["m_CommonParameters"]);
+                if (group.Length > 1)
+                    foreach (var pg in pgs.Skip(1)) tessLists.AddRange(new[] { pg["m_PlayerSubPrograms"], pg["m_ParameterBlobIndices"] });
             }
+        }
 
         layouts.Freeze(); // decide every layout before the parallel part reads them
         var results = new MetalProgram[jobs.Count];
         Parallel.For(0, jobs.Count, j =>
         {
-            var (tag, sub, par) = jobs[j];
-            var (ok, msl, refl) = Xlat.Translate(Xlat.Dxbc(sub.Code), par.ToDesc(layouts), HlslccFlags);
+            var (tag, subs, pars) = jobs[j];
+            var (ok, msl, refl) = subs.Length == 1
+                ? Xlat.Translate(Xlat.Dxbc(subs[0].Code), pars[0].ToDesc(layouts), HlslccFlags)
+                // each stage declares the cbuffers it uses first, for all three: give it every member the three read
+                : Xlat.TranslateTess(subs.Select(x => Xlat.Dxbc(x.Code)).ToArray(), pars.Select(x => x.WithCbsOf(pars).ToDesc(layouts)).ToArray(), HlslccFlags);
             if (!ok) throw new Exception($"{tag}: {refl.Split('\n').FirstOrDefault(l => l.StartsWith("error"))}");
             Dump.Msl(tag, msl);
-            results[j] = MetalProgram.From(sub, msl, refl);
+            results[j] = MetalProgram.From(subs[0], msl, refl, tess: subs.Length > 1);
         });
 
         var placed = jobs.Select((_, j) => (sub: Add(results[j].SubEntry), par: Add(results[j].ParamEntry))).ToList();
@@ -91,14 +103,24 @@ static class MetalShader
         // Metal parameter entries are complete per subprogram, so nothing is shared any more.
         foreach (var c in commons)
             foreach (var list in c.Children) SetArray(list, Array.Empty<AssetTypeValueField>());
+        if (tessLists.Count > 0)
+        {
+            // Unity's Metal build: hull and domain lists have no tiers at all; stageCounts counts the stage types left
+            foreach (var list in tessLists) SetArray(list, Array.Empty<AssetTypeValueField>());
+            bf["stageCounts"]["Array"][0].AsUInt = (uint)Progs.Count(x => passes.Any(p => HasPrograms(p[x])));
+        }
 
         WriteBlob(bf, entries);
         platforms[0].AsUInt = PlatformMetal;
         return bf.WriteToByteArray();
     }
 
+    static readonly string[] TessProgs = { "progVertex", "progHull", "progDomain" };
+    static bool HasPrograms(AssetTypeValueField prog) => prog["m_PlayerSubPrograms"]["Array"].Children.Any(t => t["Array"].Children.Count > 0);
+    static string Keywords(AssetTypeValueField sp) => string.Join(",", sp["m_KeywordIndices"]["Array"].Children.Select(k => k.AsUShort));
+
     // Segment 0 holds the entry table; entries follow in order, a new segment starting when 8 MiB would be crossed.
-    static void WriteBlob(AssetTypeValueField bf, List<byte[]> entries)
+    internal static void WriteBlob(AssetTypeValueField bf, List<byte[]> entries)
     {
         var segments = new List<MemoryStream> { new() };
         var table = new List<(int off, int len, int seg)>();
@@ -145,7 +167,7 @@ static class MetalShader
         }).ToList());
     }
 
-    static void SetArray(AssetTypeValueField vector, IList<AssetTypeValueField> items)
+    internal static void SetArray(AssetTypeValueField vector, IList<AssetTypeValueField> items)
     {
         var arr = vector["Array"];
         arr.Children = items.ToList();
@@ -159,7 +181,8 @@ sealed class MetalProgram
     public int Type; public byte[] SubEntry = Array.Empty<byte>(), ParamEntry = Array.Empty<byte>();
     const int BlobVersion = 202012090;
 
-    public static MetalProgram From(SubProgram d3d, string msl, string refl)
+    // tess: msl/refl are a whole tessellated program (vertex + hull + domain stages), d3d its vertex stage.
+    public static MetalProgram From(SubProgram d3d, string msl, string refl, bool tess = false)
     {
         var lines = refl.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.Split('\t')).ToList();
         var type = d3d.Type switch
@@ -168,18 +191,24 @@ sealed class MetalProgram
             17 or 18 => 24, // DX11 pixel -> Metal fragment
             _ => throw new Exception($"no Metal equivalent for D3D program type {d3d.Type}"),
         };
-        return new MetalProgram { Type = type, SubEntry = Sub(d3d, type, msl, lines), ParamEntry = MetalParams.Build(lines) };
+        if (tess && type != 23) throw new Exception($"tessellated program from D3D program type {d3d.Type}");
+        return new MetalProgram { Type = type, SubEntry = Sub(d3d, type, msl, lines, tess), ParamEntry = MetalParams.Build(lines) };
     }
 
     // 48-byte header, entry point name, then the source. Header fields as Unity 2022.3 writes them:
-    // magic, name offset, format 6, source offset, 5 zeros, flags (37, +2 when the vertex stage writes the
-    // render target array index), colour write mask (4 bits per output; ~0 except unwritten components), 0.
+    // magic, name offset, format 6, source offset, 5 tessellation values (else 0: MTLTessellationPartitionMode,
+    // MTLWinding, max factor, patches per threadgroup, the patch kernel's buffer count), flags (37, +2 when the
+    // vertex stage writes the render target array index), colour write mask (4 bits per output; ~0 except
+    // unwritten components), 0.
     static byte[] Code(string msl, List<string[]> refl, int type)
     {
         const string entry = "xlatMtlMain";
         uint flags = 37, mask = 0xffffffff;
+        var tess = new uint[5];
         foreach (var l in refl)
         {
+            if (l[0] == "tess") for (var i = 0; i < 4; i++) tess[i] = uint.Parse(l[1 + i]);
+            if (l[0] == "tesskernel") tess[4] = uint.Parse(l[1]);
             if (l[0] == "builtin" && int.Parse(l[1]) == 4 /* NAME_RENDER_TARGET_ARRAY_INDEX */ && type == 23) flags |= 2;
             if (l[0] == "fout")
             {
@@ -190,7 +219,7 @@ sealed class MetalProgram
         var ms = new MemoryStream();
         var w = new BinaryWriter(ms);
         var src = 48 + entry.Length + 1;
-        foreach (var v in new uint[] { 0xf00dcafe, 48, 6, (uint)src, 0, 0, 0, 0, 0, flags, mask, 0 }) w.Write(v);
+        foreach (var v in new uint[] { 0xf00dcafe, 48, 6, (uint)src }.Concat(tess).Concat(new[] { flags, mask, 0u })) w.Write(v);
         w.Write(Encoding.ASCII.GetBytes(entry)); w.Write((byte)0);
         w.Write(Encoding.UTF8.GetBytes(msl));
         return ms.ToArray();
@@ -205,7 +234,15 @@ sealed class MetalProgram
     };
     const int MetalAttrib0 = 13;
 
-    static byte[] Sub(SubProgram d3d, int type, string msl, List<string[]> refl)
+    // Unity's vertex channel for a semantic: 0 position, 1 normal, 2 tangent, 3 colour, 4 + n texcoord n.
+    static int? Channel(string semantic) => semantic switch
+    {
+        "POSITION0" => 0, "NORMAL0" => 1, "TANGENT0" => 2, "COLOR0" => 3,
+        _ when semantic.StartsWith("TEXCOORD") && int.TryParse(semantic[8..], out var n) && n < 8 => 4 + n,
+        _ => null,
+    };
+
+    static byte[] Sub(SubProgram d3d, int type, string msl, List<string[]> refl, bool tess)
     {
         var ms = new MemoryStream();
         var w = new BinaryWriter(ms);
@@ -219,9 +256,20 @@ sealed class MetalProgram
 
         var bySemantic = d3d.Channels.ToDictionary(c => D3DTargetSemantic.TryGetValue(c.Target, out var sem) ? sem : throw new Exception($"D3D channel target {c.Target}"), c => c.Source);
         var channels = new List<(int, int)>();
-        foreach (var l in refl.Where(l => l[0] == "input"))
-            channels.Add((bySemantic.TryGetValue(l[1], out var src) ? src : throw new Exception($"vertex input {l[1]} has no D3D channel"), MetalAttrib0 + int.Parse(l[2])));
-        w.Write(d3d.SourceMap);
+        var sourceMap = d3d.SourceMap;
+        if (!tess)
+            foreach (var l in refl.Where(l => l[0] == "input"))
+                channels.Add((bySemantic.TryGetValue(l[1], out var src) ? src : throw new Exception($"vertex input {l[1]} has no D3D channel"), MetalAttrib0 + int.Parse(l[2])));
+        else
+            // Unity lists every stage_in attribute of the combined program whose semantic is a vertex channel, the hull's
+            // control points and patch constants included, by attribute; INTERNALTESSPOS, CUSTOM_INSTANCE_ID etc. are not
+            foreach (var l in refl.Where(l => l[0] == "input").DistinctBy(l => int.Parse(l[2])).OrderBy(l => int.Parse(l[2])))
+                if ((bySemantic.TryGetValue(l[1], out var src) ? src : Channel(l[1])) is int ch)
+                {
+                    channels.Add((ch, MetalAttrib0 + int.Parse(l[2])));
+                    sourceMap |= 1 << ch;
+                }
+        w.Write(sourceMap);
         w.Write(channels.Count);
         foreach (var (src, dst) in channels) { w.Write(src); w.Write(dst); }
         return ms.ToArray();

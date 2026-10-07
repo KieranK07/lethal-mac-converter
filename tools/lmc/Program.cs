@@ -116,6 +116,25 @@ switch (cmd)
         }
         break;
     }
+    case "progs":
+    {
+        using var d = new DataDir(args[1]);
+        var s = d.Shaders().First(x => x.Name == args[2]);
+        var bf = d.Base(s.File, s.PathId);
+        foreach (var ss in bf["m_ParsedForm"]["m_SubShaders"]["Array"].Children)
+            foreach (var p in ss["m_Passes"]["Array"].Children)
+            {
+                Console.WriteLine($"pass {p["m_Name"].AsString} names={p["m_NameIndices"]["Array"].Children.Count}");
+                foreach (var prog in new[] { "progVertex", "progFragment", "progGeometry", "progHull", "progDomain" })
+                {
+                    var outer = p[prog]["m_PlayerSubPrograms"]["Array"].Children;
+                    var types = outer.SelectMany(o => o["Array"].Children).Select(sp => sp["m_GpuProgramType"].AsSByte).Distinct();
+                    Console.WriteLine($"  {prog}: tiers={outer.Count} subs=[{string.Join(",", outer.Select(o => o["Array"].Children.Count))}] params=[{string.Join(",", p[prog]["m_ParameterBlobIndices"]["Array"].Children.Select(o => o["Array"].Children.Count))}] types=[{string.Join(",", types)}] keywords={p[prog]["m_SerializedKeywordStateMask"]["Array"].Children.Count}");
+                }
+            }
+        Console.WriteLine($"stageCounts=[{string.Join(",", bf["stageCounts"]["Array"].Children.Select(x => x.AsString))}] keywordNames={bf["m_ParsedForm"]["m_KeywordNames"]["Array"].Children.Count}");
+        break;
+    }
     case "metalize":
         return Metalize.Run(args[1], args[2]);
     case "info":

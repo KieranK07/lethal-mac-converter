@@ -5,7 +5,7 @@
 #     once and downloads your copy with Valve's SteamCMD
 #   ./convert.sh --game "/path/to/Lethal Company"        # use an existing Windows install instead
 #   ./convert.sh --steam-user <your Steam login name>
-#   options: --out "<path>.app" (default ~/Applications/Lethal Company.app)
+#   options: --out "<path>.app" (default ~/Applications/Lethal Company.app), --no-steam-tile
 #
 # Nothing from the game, Unity or Valve is in this repository. Everything is downloaded from its official
 # source or built from source here, on your Mac, into ~/Library/Caches/lethal-mac-converter.
@@ -13,12 +13,13 @@ set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 export LMC_CACHE="${LMC_CACHE:-$HOME/Library/Caches/lethal-mac-converter}"
 OUT_APP="$HOME/Applications/Lethal Company.app"
-GAME= STEAM_USER=
+GAME= STEAM_USER= STEAM_TILE=1
 while [ $# -gt 0 ]; do
   case $1 in
     --game) GAME=$2; shift 2 ;;
     --steam-user) STEAM_USER=$2; shift 2 ;;
     --out) OUT_APP=$2; shift 2 ;;
+    --no-steam-tile) STEAM_TILE=; shift ;;
     *) echo "unknown option $1"; exit 2 ;;
   esac
 done
@@ -35,8 +36,7 @@ if ! command -v dotnet >/dev/null && [ ! -x "$LMC_CACHE/dotnet/dotnet" ]; then
   curl -fsSL https://dot.net/v1/dotnet-install.sh -o "$LMC_CACHE/dotnet-install.sh"
   sh "$LMC_CACHE/dotnet-install.sh" --channel 10.0 --install-dir "$LMC_CACHE/dotnet" >/dev/null
 fi
-if [ -x "$LMC_CACHE/dotnet/dotnet" ]; then export DOTNET_ROOT="$LMC_CACHE/dotnet" PATH="$LMC_CACHE/dotnet:$PATH"
-else export DOTNET_ROOT="$(dirname "$(readlink -f "$(command -v dotnet)")")"; fi
+[ -x "$LMC_CACHE/dotnet/dotnet" ] && export PATH="$LMC_CACHE/dotnet:$PATH"
 export DOTNET_ROLL_FORWARD=Major DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 
 # --- 1. Unity's terms ----------------------------------------------------------------------------------
@@ -102,7 +102,7 @@ if [ ! -f "$LMC_CACHE/classdata.tpk" ]; then
 fi
 say "Translating shaders (several minutes)"
 DATA="$LMC_CACHE/data"; rm -rf "$DATA"; mkdir -p "$DATA"
-"$LMC_CACHE/tools/lmc" metalize "$GAME/Lethal Company_Data" "$DATA"
+dotnet "$LMC_CACHE/tools/lmc.dll" metalize "$GAME/Lethal Company_Data" "$DATA"
 
 # --- 5. Unity's Input System, compiled for macOS (controllers) ----------------------------------------
 # The game's Windows compile lacks the macOS gamepad layouts (Xbox over HID/Bluetooth, Nimbus+). Same package
@@ -118,7 +118,7 @@ python3 -I "$HERE/scripts/assemble_app.py" --game "$GAME" --unity-pkg-cache "$LM
 codesign --force --deep -s - "$OUT_APP"
 
 # --- 7. a tile in your Steam library (optional) ----------------------------------------------------------
-if [ -d "$HOME/Library/Application Support/Steam/userdata" ]; then
+if [ -n "$STEAM_TILE" ] && [ -d "$HOME/Library/Application Support/Steam/userdata" ]; then
   if pgrep -x steam_osx >/dev/null; then
     echo "To add it to your Steam library: quit Steam, then run"
     echo "  python3 -I \"$HERE/scripts/steam_shortcut.py\" --app \"$OUT_APP\""

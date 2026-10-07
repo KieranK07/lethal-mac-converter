@@ -172,6 +172,7 @@ def extract(src, prefixes, dest, stop_after=None):
 
 def unity_files(cache):
     """Extract (once) what we need from Unity's official pkgs into cache/unity-<hash>/."""
+    os.makedirs(cache, exist_ok=True)
     root = os.path.join(cache, f'unity-{UNITY_HASH}')
     support, editor = os.path.join(root, 'support'), os.path.join(root, 'editor')
     if not os.path.exists(os.path.join(support, '.complete')):

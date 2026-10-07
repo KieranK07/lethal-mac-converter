@@ -12,6 +12,12 @@ Each change mirrors what Unity 2022.3's own Metal shaders contain:
 4. Multisampled texture arrays are read as `tex.read(coord.xy, coord.z, sample)`.
 5. SV_PrimitiveID in pixel shaders becomes `[[ primitive_id ]]`. Unity's Metal build compiles HDRP's
    debug-display variants without it; ours come from the D3D variant, which reads it.
+6. Tessellation (vertex + hull + domain translated through one GLSLCrossDependencyData, docs/METAL-TESSELLATION.md):
+   - the tessellation `vertexFunction` declares `has_base_vertex_instance` too (it subtracts the bases);
+   - the post-tessellation function also takes `patch_id`, the control point / patch constant / tess factor
+     buffers after its own buffers, and reads `tessFactor = tessFactors[patchID]`;
+   - the domain stage's SV_TessFactor / SV_InsideTessFactor inputs read that `tessFactor`, as in the hull;
+   - scalar control point inputs lose their `.x` where Unity's do (domain; hull with a control point phase).
 """
 import pathlib
 import sys
@@ -64,11 +70,12 @@ for what, base in (("InstanceID", "BaseInstance"), ("VertexID", "BaseVertex")):
 # the function constant itself, declared once the vertex shader's builtin inputs are known
 patch("toMetal.cpp",
       "        DeclareClipPlanes(&psShader->asPhases[0].psDecl[0], psShader->asPhases[0].psDecl.size());",
-      "        if (psShader->eShaderType == VERTEX_SHADER && (psContext->flags & HLSLCC_FLAG_METAL_TESSELLATION) == 0)\n"
+      "        if (psShader->eShaderType == VERTEX_SHADER)\n"
       "            for (const auto &mem : m_StructDefinitions[\"\"].m_Members)\n"
       "                if (mem.first == \"mtl_BaseVertex\" || mem.first == \"mtl_BaseInstance\")\n"
       "                {\n"
-      "                    bcatcstr(glsl, \"constant bool has_base_vertex_instance [[ function_constant(4) ]];\\n\");\n"
+      "                    // the tessellation vertexFunction has it after the structs, right before the function\n"
+      "                    bcatcstr((psContext->flags & HLSLCC_FLAG_METAL_TESSELLATION) ? bodyglsl : glsl, \"constant bool has_base_vertex_instance [[ function_constant(4) ]];\\n\");\n"
       "                    break;\n"
       "                }\n"
       "        DeclareClipPlanes(&psShader->asPhases[0].psDecl[0], psShader->asPhases[0].psDecl.size());")
@@ -105,4 +112,72 @@ patch("toMetalDeclaration.cpp",
       '            break;\n'
       '        case NAME_PRIMITIVE_ID:\n'
       '            m_StructDefinitions[""].m_Members.push_back(std::make_pair("mtl_PrimitiveID", "uint mtl_PrimitiveID [[ primitive_id ]]"));')
+# 6. tessellation: post-tessellation function arguments and tess factor reads (has_base_vertex_instance: see 3)
+patch("toMetal.cpp",
+      '            m_StructDefinitions[""].m_Members.push_back(std::make_pair("input", GetInputStructName() + " input [[ stage_in ]]"));',
+      '            if (psShader->eShaderType == DOMAIN_SHADER && (psContext->flags & HLSLCC_FLAG_METAL_TESSELLATION) != 0 && psContext->psDependencies)\n'
+      '            {\n'
+      '                m_StructDefinitions[""].m_Members.push_back(std::make_pair("patchID", "uint patchID [[ patch_id ]]"));\n'
+      '                // the next free slots after every buffer of the three stages (the hull\'s 0xffff-n keys can collide\n'
+      '                // with a reserved UAV key once the stage offset is added)\n'
+      '                auto next = [&]() { uint32_t s = m_BufferSlots.PeekFirstFreeSlot(); m_BufferSlots.ReserveBindingSlot(s, BindingSlotAllocator::UAV); return s; };\n'
+      '                bstring buffer = bfromcstr("");\n'
+      '                if (hasControlPoint)\n'
+      '                {\n'
+      '                    bformata(buffer, "const device Mtl_ControlPoint *controlPoints [[ buffer(%d) ]]", next());\n'
+      '                    m_StructDefinitions[""].m_Members.push_back(std::make_pair("controlPoints", (const char *)buffer->data));\n'
+      '                    btrunc(buffer, 0);\n'
+      '                }\n'
+      '                if (hasPatchConstant)\n'
+      '                {\n'
+      '                    bformata(buffer, "const device Mtl_PatchConstant *patchConstants [[ buffer(%d) ]]", next());\n'
+      '                    m_StructDefinitions[""].m_Members.push_back(std::make_pair("patchConstants", (const char *)buffer->data));\n'
+      '                    btrunc(buffer, 0);\n'
+      '                }\n'
+      '                bformata(buffer, "const device %s *tessFactors [[ buffer(%d) ]]", psShader->sInfo.eTessDomain == TESSELLATOR_DOMAIN_QUAD ? "MTLQuadTessellationFactorsHalf" : "MTLTriangleTessellationFactorsHalf", next());\n'
+      '                m_StructDefinitions[""].m_Members.push_back(std::make_pair("tessFactors", (const char *)buffer->data));\n'
+      '                bdestroy(buffer);\n'
+      '            }\n'
+      '            m_StructDefinitions[""].m_Members.push_back(std::make_pair("input", GetInputStructName() + " input [[ stage_in ]]"));')
+patch("toMetal.cpp",
+      '            bcatcstr(bodyglsl, GetOutputStructName().c_str());\n'
+      '            bcatcstr(bodyglsl, " output;\\n");\n'
+      '        }\n',
+      '            bcatcstr(bodyglsl, GetOutputStructName().c_str());\n'
+      '            bcatcstr(bodyglsl, " output;\\n");\n'
+      '        }\n'
+      '        if (psShader->eShaderType == DOMAIN_SHADER && (psContext->flags & HLSLCC_FLAG_METAL_TESSELLATION) != 0 && psContext->psDependencies)\n'
+      '        {\n'
+      '            psContext->AddIndentation();\n'
+      '            bformata(bodyglsl, "%s tessFactor;\\n", psShader->sInfo.eTessDomain == TESSELLATOR_DOMAIN_QUAD ? "MTLQuadTessellationFactorsHalf" : "MTLTriangleTessellationFactorsHalf");\n'
+      '            psContext->AddIndentation();\n'
+      '            bcatcstr(bodyglsl, "tessFactor = tessFactors[patchID];\\n");\n'
+      '        }\n')
+# in the domain stage the patch constant signature carries D3D_NAME values (13 tri edge, 14 tri inside), not the
+# token names the switch below expects, so name tess factor inputs by semantic: SV_TessFactor[i], SV_InsideTessFactor[i]
+patch("toMetalOperand.cpp",
+      '            *piRebase = psIn->iRebase;\n'
+      '            switch (psIn->eSystemValueType)',
+      '            *piRebase = psIn->iRebase;\n'
+      '            if (psContext->psShader->eShaderType == DOMAIN_SHADER && (psIn->semanticName == "SV_TessFactor" || psIn->semanticName == "SV_InsideTessFactor"))\n'
+      '            {\n'
+      '                const bool inside = psIn->semanticName == "SV_InsideTessFactor";\n'
+      '                oss << (inside ? "tessFactor.insideTessellationFactor" : "tessFactor.edgeTessellationFactor");\n'
+      '                if (!inside || psContext->psShader->sInfo.eTessDomain == TESSELLATOR_DOMAIN_QUAD)\n'
+      '                    oss << "[" << psIn->ui32SemanticIndex << "]";\n'
+      '                *pui32IgnoreSwizzle = 1;\n'
+      '                break;\n'
+      '            }\n'
+      '            switch (psIn->eSystemValueType)')
+# scalar control point inputs (a uint CUSTOM_INSTANCE_ID, say) are read without a swizzle where Unity's Metal build
+# reads them so: in the domain stage, and in a hull whose control point phase declares them (that marks the
+# register for its fork/join phases too; a pass-through hull keeps Unity's `.x` there). Nothing else marks them.
+patch("toMetalDeclaration.cpp",
+      '            int iNumComponents = psOperand->GetNumInputElements(psContext);\n'
+      '            psShader->acInputDeclared[0][ui32Reg] = (char)psSig->ui32Mask;\n',
+      '            int iNumComponents = psOperand->GetNumInputElements(psContext);\n'
+      '            psShader->acInputDeclared[0][ui32Reg] = (char)psSig->ui32Mask;\n'
+      '            if (iNumComponents == 1 && ((psOperand->eType == OPERAND_TYPE_INPUT_CONTROL_POINT && psShader->eShaderType == DOMAIN_SHADER) ||\n'
+      '                                        (psOperand->eType == OPERAND_TYPE_INPUT && psShader->eShaderType == HULL_SHADER)))\n'
+      '                psShader->abScalarInput[regSpace][ui32Reg] |= (int)ui32CompMask;\n')
 print("HLSLcc patched for Unity 2022.3 Metal conventions")

@@ -6,7 +6,7 @@
 Lists every file under Contents that differs or exists on one side only. With --lmc, the Unity serialized
 files that differ are compared object by object, so shader objects can be told apart from everything else.
 """
-import argparse, hashlib, os, subprocess
+import argparse, hashlib, os, subprocess, sys
 
 def files(app):
     root = os.path.join(app, 'Contents')
@@ -23,18 +23,20 @@ def files(app):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('a'); ap.add_argument('b'); ap.add_argument('--lmc')
+    ap.add_argument('a'); ap.add_argument('b'); ap.add_argument('--lmc', help='lmc executable or lmc.dll')
     a = ap.parse_args()
     fa, fb = files(a.a), files(a.b)
     same = [p for p in fa if fb.get(p) == fa[p]]
-    print(f'{len(same)} identical files')
+    print(f'{len(same)} identical files', flush=True)
     for p in sorted(set(fa) | set(fb)):
         if p not in fb: print(f'only A  {p}')
         elif p not in fa: print(f'only B  {p}')
         elif fa[p] != fb[p]: print(f'differ  {p}')
+    sys.stdout.flush()
     if a.lmc:
         data = lambda app: os.path.join(app, 'Contents', 'Resources', 'Data')
-        subprocess.run([a.lmc, 'objdiff', data(a.a), data(a.b)], check=True)
+        lmc = ['dotnet', a.lmc] if a.lmc.endswith('.dll') else [a.lmc]
+        subprocess.run(lmc + ['objdiff', data(a.a), data(a.b)], check=True)
 
 if __name__ == '__main__':
     main()

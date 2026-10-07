@@ -59,18 +59,24 @@ extern "C" __attribute__((visibility("default"))) int lmc_xlat(const void *dxbc,
     return ok;
 }
 
-// Unity player DXBC (RDEF stripped) + Unity parameter description (see rdef::Parse) -> MSL.
+// Unity player DXBC (RDEF stripped) + Unity parameter description (see rdef::Parse) -> DXBC with an RDEF.
+static std::vector<uint8_t> UnityDxbc(const void *dxbc, const char *desc)
+{
+    const uint8_t *d = (const uint8_t *)dxbc;
+    const uint32_t *shex = rdef::FindChunk(d, "SHEX");
+    if (!shex) shex = rdef::FindChunk(d, "SHDR");
+    if (!shex) throw std::runtime_error("no SHEX/SHDR chunk");
+    uint32_t type;
+    auto decls = rdef::ScanDecls(shex, type);
+    return rdef::WithRdef(d, rdef::Build(rdef::Parse(desc), decls, type));
+}
+
+// Unity player DXBC + Unity parameter description -> MSL.
 extern "C" __attribute__((visibility("default"))) int lmc_xlat_unity(const void *dxbc, const char *desc, unsigned flags, char **msl, char **reflection)
 {
     try
     {
-        const uint8_t *d = (const uint8_t *)dxbc;
-        const uint32_t *shex = rdef::FindChunk(d, "SHEX");
-        if (!shex) shex = rdef::FindChunk(d, "SHDR");
-        if (!shex) throw std::runtime_error("no SHEX/SHDR chunk");
-        uint32_t type;
-        auto decls = rdef::ScanDecls(shex, type);
-        auto full = rdef::WithRdef(d, rdef::Build(rdef::Parse(desc), decls, type));
+        auto full = UnityDxbc(dxbc, desc);
         return lmc_xlat(full.data(), flags, msl, reflection);
     }
     catch (const std::exception &e)
@@ -79,6 +85,46 @@ extern "C" __attribute__((visibility("default"))) int lmc_xlat_unity(const void 
         *reflection = Dup(std::string("error\t0\t") + e.what() + "\n");
         return 0;
     }
+}
+
+// A tessellated pass. Unity's Metal build has no hull or domain programs: the vertex and hull stages become the
+// compute kernel `patchKernel`, the domain stage the post-tessellation vertex function `xlatMtlMain`, in one
+// source. The stages are translated vertex -> hull -> domain through one GLSLCrossDependencyData (shared
+// arguments, structs and buffer slots) and joined with Unity's stage markers. Reflection: each stage's records
+// follow a "stage\t<0|1|2>" line.
+extern "C" __attribute__((visibility("default"))) int lmc_xlat_unity_tess(const void *vs, const char *vsDesc, const void *hs, const char *hsDesc,
+                                                                         const void *ds, const char *dsDesc, unsigned flags, char **msl, char **reflection)
+{
+    const void *dxbc[3] = {vs, hs, ds};
+    const char *desc[3] = {vsDesc, hsDesc, dsDesc};
+    std::string src, refl;
+    try
+    {
+        GLSLCrossDependencyData deps;
+        for (int s = 0; s < 3; s++)
+        {
+            auto full = UnityDxbc(dxbc[s], desc[s]);
+            GlExtensions ext = {};
+            HLSLccSamplerPrecisionInfo precisions;
+            Reflect r;
+            GLSLShader result;
+            int ok = TranslateHLSLFromMem((const char *)full.data(), flags | HLSLCC_FLAG_METAL_TESSELLATION, LANG_METAL, &ext, &deps, precisions, r, &result);
+            refl += "stage\t" + std::to_string(s) + "\n" + r.out.str();
+            if (!ok) throw std::runtime_error("stage " + std::to_string(s) + " failed");
+            if (s == 0) src = result.sourceCode;
+            else if (s == 1) src += "// SHADER_STAGE_HULL_begin\n" + result.sourceCode + "\n// SHADER_STAGE_HULL_end\n";
+            else src += "// SHADER_STAGE_DOMAIN_begin\n" + result.sourceCode + "\n// SHADER_STAGE_DOMAIN_end\n";
+        }
+    }
+    catch (const std::exception &e)
+    {
+        *msl = Dup("");
+        *reflection = Dup(refl + "error\t0\t" + e.what() + "\n");
+        return 0;
+    }
+    *msl = Dup(src);
+    *reflection = Dup(refl);
+    return 1;
 }
 
 extern "C" __attribute__((visibility("default"))) void lmc_xlat_free(void *p) { free(p); }

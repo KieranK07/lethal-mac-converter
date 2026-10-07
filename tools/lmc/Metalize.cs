@@ -24,7 +24,7 @@ static class Metalize
                 var bf = d.Am.GetBaseField(inst, info);
                 var s = new ShaderRef(key, info.PathId, bf["m_ParsedForm"]["m_Name"].AsString, new());
                 if (only != null && !only.Contains(s.Name)) continue;
-                try { repl[info.PathId] = MetalShader.Convert(d, s, problems); shaders++; }
+                try { repl[info.PathId] = NeedsGeometry(bf) ? NoPrograms(bf) : MetalShader.Convert(d, s, problems); shaders++; }
                 catch (Exception e) { problems.Add($"{key}:{info.PathId} {s.Name}: {e.Message}"); }
             }
             foreach (var info in inst.file.GetAssetsOfType(AssetClassID.ComputeShader))
@@ -39,10 +39,32 @@ static class Metalize
             File.WriteAllBytes(outPath, SerializedWriter.WriteSerialized(inst, repl, SerializedWriter.StandaloneOSX));
             Console.WriteLine($"{key}: {repl.Count} objects replaced ({sw.Elapsed.TotalSeconds:F0}s)");
         }
-        File.WriteAllLines(Path.Combine(outDir, "metalize-problems.txt"), problems);
         Console.WriteLine($"{shaders} shaders and {computes} compute shaders translated, {problems.Count} problems, {sw.Elapsed.TotalSeconds:F0}s");
-        foreach (var p in problems.Take(20)) Console.WriteLine("  " + p);
+        foreach (var p in problems) Console.WriteLine("  " + p);
         return problems.Count == 0 ? 0 : 1;
+    }
+
+    static bool NeedsGeometry(AssetTypeValueField bf) =>
+        bf["m_ParsedForm"]["m_SubShaders"]["Array"].Children.SelectMany(ss => ss["m_Passes"]["Array"].Children)
+            .Any(p => p["progGeometry"]["m_PlayerSubPrograms"]["Array"].Children.Any(t => t["Array"].Children.Count > 0));
+
+    // Metal has no geometry stage. Unity's own Metal build keeps such a shader (only Hidden/VR/BlitFromTex2DToTexArraySlice
+    // here) with every pass's program lists emptied, its names and shared parameters dropped and an empty blob.
+    static byte[] NoPrograms(AssetTypeValueField bf)
+    {
+        foreach (var p in bf["m_ParsedForm"]["m_SubShaders"]["Array"].Children.SelectMany(ss => ss["m_Passes"]["Array"].Children))
+        {
+            MetalShader.SetArray(p["m_NameIndices"], Array.Empty<AssetTypeValueField>());
+            foreach (var prog in new[] { "progVertex", "progFragment", "progGeometry", "progHull", "progDomain", "progRayTracing" })
+            {
+                foreach (var list in new[] { "m_PlayerSubPrograms", "m_ParameterBlobIndices" })
+                    foreach (var tier in p[prog][list]["Array"].Children) MetalShader.SetArray(tier, Array.Empty<AssetTypeValueField>());
+                foreach (var c in p[prog]["m_CommonParameters"].Children) MetalShader.SetArray(c, Array.Empty<AssetTypeValueField>());
+            }
+        }
+        MetalShader.WriteBlob(bf, new());
+        bf["platforms"]["Array"].Children[0].AsUInt = MetalShader.PlatformMetal;
+        return bf.WriteToByteArray();
     }
 
     // BuildSettings.m_GraphicsAPIs: Direct3D11 (2) -> Metal (16); the player picks its renderer from this list.

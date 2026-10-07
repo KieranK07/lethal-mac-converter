@@ -91,6 +91,10 @@ static class MetalParams
             }
         }
         Close();
+        // A tessellated program's stages report each shared cbuffer again, without values; the stage that declared
+        // it (and bound it) has them.
+        cbs = cbs.GroupBy(c => c.Name).Select(g => g.MaxBy(c => c.Values.Count + c.Structs.Count)!).ToList();
+        binds = binds.Distinct().ToList();
 
         var ms = new MemoryStream();
         var w = new BinaryWriter(ms);

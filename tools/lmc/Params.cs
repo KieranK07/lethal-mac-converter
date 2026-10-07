@@ -117,6 +117,25 @@ sealed class Params
         return p;
     }
 
+    // This program with each cbuffer holding every value any of `group` reads from it (the stages of one tessellated
+    // program share one struct per cbuffer, declared by the first stage that uses it).
+    public Params WithCbsOf(IEnumerable<Params> group)
+    {
+        var all = group.SelectMany(g => g.Cbs).ToList();
+        var p = (Params)MemberwiseClone();
+        p.Cbs = Cbs.Select(cb =>
+        {
+            var same = all.Where(c => c.Name == cb.Name).ToList();
+            return new Cb
+            {
+                Name = cb.Name, Size = same.Max(c => c.Size), Partial = cb.Partial,
+                Params = same.SelectMany(c => c.Params).DistinctBy(v => v.Name).ToList(),
+                Structs = same.SelectMany(c => c.Structs).DistinctBy(v => v.Name).ToList(),
+            };
+        }).ToList();
+        return p;
+    }
+
     // Unity's inline sampler state: bits 0-1 filter (point/linear/trilinear), then 2 bits each for wrap U, V, W
     // (repeat/clamp/mirror/mirroronce), bit 8 depth compare. HLSLcc turns a sampler *name* containing those
     // words into the matching constexpr sampler, as Unity's own Metal compile does.

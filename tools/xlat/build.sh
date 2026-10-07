@@ -12,8 +12,8 @@ if [ ! -d "$SRC/.git" ]; then
   git clone -q https://github.com/Unity-Technologies/HLSLcc.git "$SRC"
 fi
 git -C "$SRC" -c advice.detachedHead=false checkout -q "$HLSLCC_COMMIT"
-W=$CACHE/build/hlslcc-patched
-rm -rf "$W"; mkdir -p "$W"
+W=$(mktemp -d "${TMPDIR:-/tmp}/lmc-hlslcc.XXXXXX")  # private build dir: concurrent builds don't collide
+trap 'rm -rf "$W"' EXIT
 git -C "$SRC" archive "$HLSLCC_COMMIT" | tar -x -C "$W"
 python3 -I "$HERE/patch_hlslcc.py" "$W"
 mkdir -p "$W/obj" "$OUT"
