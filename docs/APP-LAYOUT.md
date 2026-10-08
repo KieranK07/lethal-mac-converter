@@ -1,11 +1,11 @@
 # App layout: where every file in the Mac `.app` comes from
 
-Measured 2026-10-07 against the working build `~/Projects/lethal/build/LC Hybrid.app` (296 files).
+Measured 2026-10-07 against a working reference build, `LC Hybrid.app` (296 files; private, not in this repo).
 The `scripts/assemble_app.py` stage reproduces it from official sources plus the user's own game.
 
 Hash sources (md5 unless noted):
-- **Game:** the PC's Steam install, hashed in place with `Get-FileHash`.
-- **LCPort:** our Unity Mac build on the PC, `LCPort\Builds\Mac\Lethal Company.app`.
+- **Game:** a Windows Steam install, hashed in place with `Get-FileHash`.
+- **LCPort:** an earlier Unity Mac build (private, not in this repo).
 - **pkg:** `UnitySetup-Mac-Mono-Support-for-Editor-2022.3.62f2.pkg`, sha256 `ada8c5eb…75e9`, signed "Developer ID Installer: Unity Technologies SF".
 - **editor pkg:** `MacEditorInstallerArm64/Unity-2022.3.62f2.pkg` (4.5 GB). Only read with HTTP Range requests, never stored.
 
@@ -117,15 +117,8 @@ The four package DLLs with a platform `#if`:
 | F: E + the game's Windows Mono class libraries | `EntryPointNotFoundException: SetThreadErrorMode` (`Interop+Kernel32`, from `System.Console..cctor`), `DllNotFoundException: BCrypt.dll` (`Guid.NewGuid`), `EntryPointNotFoundException: GetTimeZoneInformation`, `Error while loading general save data file!` |
 | Script output (`assemble_app.py` with the game's DLLs) | **identical to baseline** |
 
-**GUI smoke test (LAN → Host → ship, input): NOT RUN.**
-- Kieran was actively using the Mac (`HIDIdleTime` 11 s; typing in Opera). The first attempt's clicks were stealing his focus, so it was stopped.
-- Run it when the Mac is free: `~/Projects/lethal/native/uitest/smoke_host.sh "<app>" <outdir>`.
-  - Do it once with `LC Hybrid.app` and once with the script output.
-  - It refuses to start if the Mac was used in the last 2 minutes and aborts if the game loses focus.
-- Untested until then:
-  - Transport: the Windows build in LAN hosting.
-  - InputSystem: keyboard and mouse in game.
-  - UI: menu clicks.
+**GUI test:** played by hand on 2026-10-07 with the converter's output: menus, hosting, the ship, input and
+the Steam overlay all work.
 
 ## 7. What must stay Mac-specific, and how the converter gets it without shipping it
 

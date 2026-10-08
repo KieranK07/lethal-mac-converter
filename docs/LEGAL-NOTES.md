@@ -1,24 +1,24 @@
 # Legal and licensing notes
 
-Researched 2026-10-07 for a private hobby repo. **Not legal advice.** *(unverified)* = not confirmed from a primary source.
+Researched 2026-10-07 for a hobby repo, public since 2026-10-08. **Not legal advice.** *(unverified)* = not confirmed from a primary source.
 
 ## Bottom line
 
-- **Private, own-copy, nothing redistributed: low practical risk.** Nothing is decrypted or bypassed (DMCA §1201 not triggered); real Steam still checks ownership.
-- **Unity is the weakest link.** No Unity term lets a *player* fetch the Mac runtime to run *someone else's* game; the ToS bans "port" and "unbundle". Low exposure while private, high if published.
+- **Own copy, nothing redistributed: low practical risk.** Nothing is decrypted or bypassed (DMCA §1201 not triggered); real Steam still checks ownership.
+- **Unity is the weakest link.** No Unity term lets a *player* fetch the Mac runtime to run *someone else's* game; the ToS bans "port" and "unbundle". Exposure rose when the repo went public; mitigated by Unity's terms shown at convert time and official downloads only.
 - **Steam's SSA literally forbids "translate … modify" and "tamper with the execution of" games** unless applicable law allows it. Every BepInEx mod breaks the same clause. Lethal Company has no EULA; Zeekerss tolerates mods.
-- **The clean-room voice plugin is the best-supported part in law** (*Sega*, *Connectix*, EU Art. 6, *SAS v WPL*), if the spec stays factual and its provenance note is accurate. It currently omits the decompile.
+- **The clean-room voice plugin is the best-supported part in law** (*Sega*, *Connectix*, EU Art. 6, *SAS v WPL*), if the spec stays factual and its provenance note is accurate. `SPEC.md` records the earlier dirty-room analysis.
 - **Valve, Discord, HLSLcc, Facepunch, open-source parts: low.** Valve headers on GitHub sit outside the SDK grant but are widely mirrored. Keep the shim a pure forwarder.
-- **Before going public:** get Zeekerss's written OK, gate the Unity download behind explicit acceptance, add a non-affiliation disclaimer, never ship outputs (`.app`, translated shaders).
+- **Going public (2026-10-08):** Zeekerss was asked first. He can't officially support it; his conditions are no piracy, no selling, and never calling it official. The README says all three. The Unity download needs explicit acceptance, the README has a non-affiliation disclaimer, and outputs (`.app`, translated shaders) are never shipped.
 
 ## Components
 
 | Component | Source | License / terms | Risk | Why | Mitigation |
 |---|---|---|---|---|---|
-| Unity Mac player (`UnityPlayer.dylib`, engine DLLs) | `download.unity3d.com` pkg | Unity ToS §17.2; Software Terms §2 | **Med** (high if public) | Runtime licensed only to developers, inside *their* Projects | Acceptance prompt; prefer the user's own Unity Hub install; ask Zeekerss; never ship the `.app` |
-| Translated shaders in game data | Generated locally | SSA §2.G; copyright of Zeekerss, Unity HDRP, asset authors | Low–Med | A persistent adaptation, but private | Never commit or share outputs; keep originals |
+| Unity Mac player (`UnityPlayer.dylib`, engine DLLs) | `download.unity3d.com` pkg | Unity ToS §17.2; Software Terms §2 | **Med–High** (public) | Runtime licensed only to developers, inside *their* Projects | Acceptance prompt; prefer the user's own Unity Hub install; ask Zeekerss; never ship the `.app` |
+| Translated shaders in game data | Generated locally | SSA §2.G; copyright of Zeekerss, Unity HDRP, asset authors | Low–Med | A persistent adaptation, made on the user's Mac only | Never commit or share outputs; keep originals |
 | Depot download + data patch | SteamCMD, user's login | SSA §2.G, §4.B "tamper" | Low | Official tool; same act as any mod; no DRM touched | Patch a copy; revert step |
-| Voice plugin (clean-room) | Our code; WebRTC M59, RNNoise, Opus (BSD); sse2neon (MIT) | BSD/MIT | Low | Functional facts aren't protected | Fix the spec's provenance; firewall the RE notes |
+| Voice plugin (clean-room) | Our code; WebRTC M59, RNNoise, Opus (BSD); sse2neon (MIT) | BSD/MIT | Low | Functional facts aren't protected | Provenance recorded in `SPEC.md`; RE notes not in the repo |
 | Steam shim | Our code; SDK 1.48 headers (Facepunch commit `d060548`); `libsteam_api.dylib` (Facepunch 2.4.1) | Steamworks SDK Access Agreement §1.1, §2.4 | Low–Med | Headers aren't redistributables; Facepunch's MIT can't relicense Valve files; flat layer checked against disassembly (§2.4) | Fetch at build (pinned hash, done); forward only, never talk to Steam directly |
 | HLSLcc | GitHub | MIT + bstrlib BSD-3 | Low | Permissive | Keep notices |
 | `com.unity.inputsystem` 1.14.0 (compiled on the user's Mac) | `download.packages.unity.com` (public npm registry) | [Unity Companion License](https://unity.com/legal/licenses/unity-companion-license) v1.4: reproduce, modify, distribute, but only "in connection with" content made under a valid Unity Engine License; Unity owns derivative works; no competitive use | Low–Med | The game was made under Zeekerss's Engine License and the DLL only runs with it, but the user (a player) holds no Engine License; same scope gap as the runtime | Fetch at convert time, never commit; unmodified source; the build tools (Roslyn 4.3.1, NETStandard.Library.Ref 2.1.0) are Microsoft MIT |
@@ -80,9 +80,9 @@ The [docs](https://docs.discord.com/developers/developer-tools/game-sdk) mark th
 - Facts are unprotected: which WebRTC components are on, parameter values, call order, enum maps. See 17 U.S.C. §102(b), Directive Art. 1(2) (*"ideas and principles … underlie its interfaces, are not protected"*), and [*SAS v WPL*](https://en.wikipedia.org/wiki/SAS_Institute_Inc_v_World_Programming_Ltd).
 - Deriving those facts from a decompile is fine under Art. 6. Art. 6(2)(b) allows passing them to the implementer because that is *"necessary for the interoperability"*.
 - **Problems:**
-  1. `native/voice/SPEC.md` lists its sources as P/Invoke, black-box tests and fingerprinting. If any fact came from the decompile, say so: an inaccurate clean-room record hurts more than the decompile.
+  1. ~~`native/voice/SPEC.md` omitted the decompile as a source.~~ Fixed: it now records the dirty-room analysis.
   2. Keep pseudocode, Ghidra output and structure mirroring out of the spec.
-  3. Publishing the spec widely is greyer under Art. 6(2)(b).
+  3. Publishing the spec widely is greyer under Art. 6(2)(b), and it is public since 2026-10-08.
 
 ## 9. Trademark
 

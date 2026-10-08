@@ -17,13 +17,13 @@ The FurShader is the only game shader this affects (`Shader Graphs/FurShader`, D
    `GLSLCrossDependencyData` and flag `0x2020080`. Header values match on every test shader. The fixes from
    section 6 are **implemented** (section 7): all 24 unique non-instanced FurShader programs compile with the OS
    Metal compiler.
-5. **Instanced variants.** The STEREO_INSTANCING variants pass or fail exactly as the hybrid's own Unity-compiled
+5. **Instanced variants.** The STEREO_INSTANCING variants pass or fail exactly as the reference build's own Unity-compiled
    ones do. Unity's own Metal output fails the same way on an equivalent test shader, so these are Unity's bugs,
    kept on purpose.
 
 ## Test setup (reproducible)
 
-- **Project:** PC `C:\Users\Kieran\Projects\lethal\tesstest` (built-in RP, made with `-batchmode -createProject`).
+- **Project:** a separate Unity 2022.3.62f2 test project, not in this repo (built-in RP, made with `-batchmode -createProject`).
 - **Shaders** in `Assets/` (all our own code):
 
   | Shader | Domain | Partitioning | Topology | maxtessfactor | Notable |
@@ -36,7 +36,7 @@ The FurShader is the only game shader this affects (`Shader Graphs/FurShader`, D
 
 - **Build:** `Assets/Editor/TessBuild.cs` (`TessBuild.All`) makes the materials, scene and build list, then builds
   StandaloneOSX (Metal only, ARM64) and StandaloneWindows64 (D3D11 only). Each build takes about 2 s incremental.
-  - Run: `ssh pc "powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\Kieran\Projects\lethal\tess-build.ps1"`.
+  - Run on a Windows machine with the editor: `powershell -NoProfile -ExecutionPolicy Bypass -File tess-build.ps1`.
   - It goes through `tess.ps1`, which runs the editor via the `TessTestEditor` scheduled task in the desktop session
     (licensing).
 - **Extract:** copy `globalgamemanagers*`, `level0`, `sharedassets0.assets`, `Resources/unity_builtin_extra` (≈0.5 MB)
@@ -353,16 +353,16 @@ vertex channel, **including control-point and patch-constant attributes**.
   only by the fma prelude and `int`/`uint` (general).
 - **FurShader, all six passes, 96 unique programs (112 slots), `mtlcheck`:**
   - plain: **24/24 ok**
-  - STEREO_INSTANCING: 12 ok / 12 fail, **exactly the variants the hybrid's own Unity compile fails/passes**
-  - DOTS_INSTANCING: 36 ok / 12 fail; the hybrid has no DOTS variants
+  - STEREO_INSTANCING: 12 ok / 12 fail, **exactly the variants the reference build's own Unity compile fails/passes**
+  - DOTS_INSTANCING: 36 ok / 12 fail; the reference build has no DOTS variants
   - The failures are only Unity's two bug classes: `.x` on a threadgroup `uint` in a pass-through hull, and
     `bitFieldInsert` defined in both stages.
-- **Against the hybrid's FurShader** (Unity-compiled from the LCPort reconstruction), all 56 non-DOTS variants match:
+- **Against the reference build's FurShader** (compiled by Unity), all 56 non-DOTS variants match:
   - header fields, flags (39 with stereo) and vertex channels are identical
   - MSL outside the cbuffer structs is identical for 20 variants
   - 32 differ only by Unity's `int(...)` around a `uint` global (general `uint`→`int` reporting)
   - the 4 pass-0.2 variants differ because the game's own pass 0.2 has a debug-display cbuffer + UAV in the domain
-    that the reconstruction lacks
+    that the reference build lacks
 - **Non-FurShader regression:**
   - `Unlit/Texture|Hidden/HDRP/TemporalAA|Exposure`: 0 problems, output data and MSL byte-identical to HEAD.
   - Full `metalize`: 179 shaders + 116 compute shaders, 0 problems. Every object is byte-identical to HEAD's run

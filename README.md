@@ -5,7 +5,11 @@ friends on Windows: the converted app talks to Steam as the real game.
 
 This repository contains only our own code. The game, Unity's Mac runtime and every third-party piece are downloaded
 on your Mac from their official sources while the converter runs, and the shaders are translated there too.
-Nothing from the game is ever shipped. Not affiliated with Zeekerss, Unity, Valve or Discord.
+Nothing from the game is ever shipped.
+
+**Unofficial fan project.** Not made, endorsed or supported by Zeekerss, so please don't send him Mac bug reports.
+It is free and only works with a copy you own on Steam; don't sell it or use it to share the game.
+Not affiliated with Zeekerss, Unity, Valve or Discord.
 
 ## Use it
 
