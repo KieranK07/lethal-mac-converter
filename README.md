@@ -1,7 +1,7 @@
 # LethalMac
 
-> This is an AI-assisted project, built with a lot of help from Claude (Anthropic's AI). I tested it on my own Mac,
-> and all the code is right here if you want to check any of it.
+> This is an AI-assisted project, built with a lot of help from Claude (Anthropic's AI). I've tested everything on my mac,
+> but all the code is open source and right here if you want to look at any of it.
 
 ![LethalMac: play Lethal Company natively on Apple Silicon Macs](docs/brand/banner.png)
 
