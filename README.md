@@ -1,5 +1,8 @@
 # LethalMac
 
+> This is an AI-assisted project, built with a lot of help from Claude (Anthropic's AI). I tested it on my own Mac,
+> and all the code is right here if you want to check any of it.
+
 ![LethalMac: play Lethal Company natively on Apple Silicon Macs](docs/brand/banner.png)
 
 LethalMac turns your own Steam copy of Lethal Company (the Windows version) into a native app for Apple Silicon Macs.
