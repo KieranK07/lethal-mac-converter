@@ -2,57 +2,59 @@
 
 ![LethalMac: play Lethal Company natively on Apple Silicon Macs](docs/brand/banner.png)
 
-Turns **your own** Steam copy of Lethal Company (Windows) into a native Apple Silicon Mac app. It still plays with
-friends on Windows: the converted app talks to Steam as the real game.
+LethalMac turns your own Steam copy of Lethal Company (the Windows version) into a native app for Apple Silicon Macs.
+You can still play with your friends on Windows, since the Mac app talks to Steam as the real game.
 
-This repository contains only our own code. The game, Unity's Mac runtime and every third-party piece are downloaded
-on your Mac from their official sources while the converter runs, and the shaders are translated there too.
-Nothing from the game is ever shipped.
+This repo only has my own code in it. The game, Unity's Mac runtime and all the third-party stuff get downloaded on
+your Mac from their official sources while it runs, and the shaders get translated on your Mac too. Nothing from the
+game is ever shipped here.
 
-**Unofficial fan project.** Not made, endorsed or supported by Zeekerss, so please don't send him Mac bug reports.
-It is free and only works with a copy you own on Steam; don't sell it or use it to share the game.
-Not affiliated with Zeekerss, Unity, Valve or Discord.
+This is an unofficial fan project. Zeekerss didn't make it and doesn't endorse or support it, so please don't send him
+Mac bug reports. It's free and it only works with a copy you own on Steam, so please don't sell it or use it to share
+the game. I'm not affiliated with Zeekerss, Unity, Valve or Discord.
 
-## Use it
+## How to use it
 
-1. **Needs:**
+1. You'll need:
    - an Apple Silicon Mac
    - Xcode Command Line Tools (`xcode-select --install`)
-   - Rosetta (`softwareupdate --install-rosetta --agree-to-license`), for Valve's SteamCMD
+   - Rosetta (`softwareupdate --install-rosetta --agree-to-license`), which Valve's SteamCMD needs
    - Lethal Company on your Steam account
-   - about 6 GB of free disk space
-2. Double-click **`LethalMac.command`**. The first time, macOS may say it can't be opened. If so, open System Settings → Privacy & Security, scroll down and click **Open Anyway**.
-3. Answer three prompts:
+   - about 6 GB of free space
+2. Double-click `LethalMac.command`. The first time, macOS might say it can't be opened. If it does, go to System Settings → Privacy & Security, scroll down and click Open Anyway.
+3. It'll ask you three things:
    - type `yes` to accept Unity's terms
    - your Steam login name
-   - SteamCMD's password / Steam Guard prompt
-4. Wait. The first run takes about 30–40 min, most of it translating shaders.
-5. Press **Play on Lethal Company in your Steam library**. The converter sets this up by briefly closing Steam: it marks the game installed and points its launch option at the Mac app. Playtime, friends' status, invites and the Steam overlay (Shift+Tab) all work as the real game. Steam may show a harmless "32-bit" warning.
+   - your password and Steam Guard code for SteamCMD
+4. Wait. The first run takes about 30 to 40 min, mostly translating shaders.
+5. Hit Play on Lethal Company in your Steam library. To set that up it closes Steam for a sec, marks the game as installed and points its launch option at the Mac app. Playtime, friends seeing what you're playing, invites and the Steam overlay (Shift+Tab) all work like the real game. Steam might show a "32-bit" warning, it's harmless.
 
 ## Updating
 
-When Lethal Company updates, your Windows friends get it automatically, and you need it too to play with them.
-Double-click `LethalMac.command` again:
-- It downloads only what changed. Your Steam login is remembered, and SteamCMD keeps its own session.
-- If neither the game nor the converter changed, it says "up to date" and stops (under a minute).
-- Otherwise it rebuilds, which takes about 10 min. The new app is built alongside the old one and swapped in at the end, so a failed update leaves your old app working.
-- Saves and settings live outside the app, so they're kept.
-- The converter also sets up a small daily check (at noon and at login) that asks Steam, without logging in, whether the game has updated. If it has, you get a Mac notification. Turn it off with `sh ~/Library/Caches/lethal-mac-converter/update_check.sh uninstall`, or skip it with `--no-update-check`.
-- If an update moves the game to a newer Unity version, the converter stops with a clear message instead of building something broken. Get a newer converter then.
+When Lethal Company updates, your Windows friends get it automatically, and you need it too if you want to keep playing
+with them. Just double-click `LethalMac.command` again.
 
-**Already have the Windows files** (e.g. copied from a PC)? `./convert.sh --game "/path/to/Lethal Company"`.
+- It only downloads what changed. Your Steam login is remembered, and SteamCMD keeps its own session.
+- If the game and the converter haven't changed, it says "up to date" and stops (under a minute).
+- Otherwise it rebuilds, which takes about 10 min. The new app gets built next to the old one and swapped in at the end, so if an update fails your old app still works.
+- Your saves and settings live outside the app, so you won't lose them.
+- It also sets up a small daily check (at noon and when you log in) that asks Steam, without logging in, if the game updated. If it did you get a Mac notification. You can turn that off with `sh ~/Library/Caches/lethal-mac-converter/update_check.sh uninstall`, or skip it with `--no-update-check`.
+- If an update moves the game to a newer Unity version, the converter stops and tells you instead of building something broken. You'll need a newer version of LethalMac when that happens.
 
-## What it does
+Already have the Windows files (like copied over from a PC)? Run `./convert.sh --game "/path/to/Lethal Company"`.
 
-| Step | Source |
+## What it actually does
+
+| Step | Where it comes from |
 |---|---|
 | Your game's Windows files | Valve's SteamCMD, your login |
 | Mac player, engine and Mono libraries | Unity's official 2022.3.62f2 installers (checksummed) |
 | Shaders: Direct3D → Metal | translated on your Mac with Unity's open-source [HLSLcc](https://github.com/Unity-Technologies/HLSLcc) |
 | Controller support | Unity's Input System 1.14.0 package, compiled for macOS |
-| Steam, voice chat | our own native code, built on your Mac |
+| Steam, voice chat | my own native code, built on your Mac |
 | Discord | Discord Game SDK 3.2.1 (official download) |
 
-Cache: `~/Library/Caches/lethal-mac-converter` (safe to delete; the next run re-downloads).
+The cache lives in `~/Library/Caches/lethal-mac-converter`. It's safe to delete, the next run just downloads everything
+again.
 
-Details: [docs/APP-LAYOUT.md](docs/APP-LAYOUT.md) (where every file comes from), [docs/LEGAL-NOTES.md](docs/LEGAL-NOTES.md).
+More details: [docs/APP-LAYOUT.md](docs/APP-LAYOUT.md) (where every file comes from) and [docs/LEGAL-NOTES.md](docs/LEGAL-NOTES.md).
