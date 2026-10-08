@@ -22,7 +22,7 @@ the game. I'm not affiliated with Zeekerss, Unity, Valve or Discord.
    - Lethal Company on your Steam account, with Steam open and signed in
    - about 6 GB of free space
 2. Double-click `LethalMac.command`. The first time, macOS might say it can't be opened. If it does, go to System Settings → Privacy & Security, scroll down and click Open Anyway.
-3. Type `yes` to accept Unity's terms. Then it opens Steam's console and puts a command on your clipboard, paste it in there and press Return. That's Steam itself downloading your copy of the game (about 1.7 GB), so LethalMac never sees your password.
+3. Type `yes` to accept Unity's terms. Then it opens Steam's console and puts a command on your clipboard, paste it in there and press Return. That's Steam itself downloading your copy of the game (about 570 MB), so LethalMac never sees your password.
 4. Wait. The first run takes about 30 to 40 min, mostly translating shaders.
 5. Hit Play on Lethal Company in your Steam library. To set that up it closes Steam for a sec, marks the game as installed and points its launch option at the Mac app. Playtime, friends seeing what you're playing, invites and the Steam overlay (Shift+Tab) all work like the real game. Steam might show a "32-bit" warning, it's harmless.
 

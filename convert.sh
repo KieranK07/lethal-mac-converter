@@ -139,7 +139,7 @@ up_to_date() {
 STEAM="$HOME/Library/Application Support/Steam"
 # By default the Steam app you're signed into downloads the files: its own download_depot console command,
 # pasted by you. It uses your existing Steam session and licence, so LethalMac never sees your password.
-# ponytail: downloads the whole depot (about 1.7 GB) on every game update; download_depot's delta manifest
+# ponytail: downloads the whole depot (about 570 MB) on every game update; download_depot's delta manifest
 # argument could fetch only changed files if that ever matters.
 steam_download() {  # $1: the public build id being downloaded
   CMD="download_depot 1966720 1966721"
@@ -148,16 +148,14 @@ steam_download() {  # $1: the public build id being downloaded
   printf '%s' "$CMD" | pbcopy
   open "steam://open/console"
   say "Steam's console just opened. Paste there (Cmd+V) and press Return:  $CMD"
-  echo "    It's already on your clipboard. Steam then downloads your copy (about 1.7 GB) and this window waits."
+  echo "    It's already on your clipboard. Steam then downloads your copy (about 570 MB) and this window waits."
   echo "    No console? Copy the line above, open steam://open/console in Safari and allow it to open Steam."
   while :; do  # Steam logs "Depot download complete : "<folder>" (manifest <id>)" when it's done
     DONE=$(cat "$STEAM/logs/content_log.txt" "$STEAM/logs/console_log.txt" 2>/dev/null |
       awk -v t="$START" '/Depot download complete/ && /app_1966720.depot_1966721/ && substr($0, 2, 19) >= t' | tail -1)
     [ -n "$DONE" ] && break
-    printf '\r    downloaded so far: %s MB ' "$(du -sm "$STEAM/steamapps/content/app_1966720/depot_1966721" 2>/dev/null | cut -f1)"
-    sleep 5
+    sleep 3
   done
-  echo
   DEPOT=$(printf '%s\n' "$DONE" | sed -n 's/.*complete : "\(.*\)" (manifest.*/\1/p' | tr '\\' /)  # Steam mixes in \ separators
   case $DEPOT in /*) ;; *) DEPOT="$STEAM/$DEPOT" ;; esac
   MANIFEST=$(printf '%s\n' "$DONE" | sed -n 's/.*(manifest \([0-9]*\)).*/\1/p')
@@ -165,6 +163,7 @@ steam_download() {  # $1: the public build id being downloaded
   rm -rf "$LMC_CACHE/game.old"
   if [ -d "$GAME" ]; then mv "$GAME" "$LMC_CACHE/game.old"; fi
   mv "$DEPOT" "$GAME"
+  rmdir "$(dirname "$DEPOT")" 2>/dev/null || true  # Steam's now-empty app_1966720 folder (inside its own app bundle)
   rm -rf "$LMC_CACHE/game.old"
   # The install record SteamCMD would write, so Steam's library can register this copy (add_steam_tile)
   SIZE=$(find "$GAME" -type f -exec stat -f %z {} + | awk '{s += $1} END {printf "%.0f", s}')
