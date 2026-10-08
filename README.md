@@ -38,7 +38,7 @@ with them. Just double-click `LethalMac.command` again.
 - If the game and the converter haven't changed, it says "up to date" and stops (under a minute).
 - Otherwise it rebuilds, which takes about 10 min. The new app gets built next to the old one and swapped in at the end, so if an update fails your old app still works.
 - Your saves and settings live outside the app, so you won't lose them.
-- It also sets up a small daily check (at noon and when you log in) that asks Steam, without logging in, if the game updated. If it did you get a Mac notification. You can turn that off with `sh ~/Library/Caches/lethal-mac-converter/update_check.sh uninstall`, or skip it with `--no-update-check`.
+- If Steam's Play button ever turns back into "Stream" (Steam refreshes its game info now and then), double-click `LethalMac.command` again. It fixes it in under a minute.
 - If an update moves the game to a newer Unity version, the converter stops and tells you instead of building something broken. You'll need a newer version of LethalMac when that happens.
 
 Already have the Windows files (like copied over from a PC)? Run `./convert.sh --game "/path/to/Lethal Company"`.

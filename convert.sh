@@ -6,7 +6,7 @@
 #   ./convert.sh --game "/path/to/Lethal Company"        # use an existing Windows install instead
 #   ./convert.sh --steam-user <your Steam login name>    # download with Valve's SteamCMD and your login instead
 #   options: --out "<path>.app" (default ~/Applications/Lethal Company.app), --no-steam-tile,
-#            --force (rebuild even if the app is already up to date), --no-update-check
+#            --force (rebuild even if the app is already up to date)
 #
 # Updating: run it again after Lethal Company updates. It downloads only what changed, and rebuilds only when
 # the game or this converter changed (about 10 min); otherwise it says the app is up to date. Saves and settings
@@ -18,7 +18,7 @@ set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 export LMC_CACHE="${LMC_CACHE:-$HOME/Library/Caches/lethal-mac-converter}"
 OUT_APP="$HOME/Applications/Lethal Company.app"
-GAME= STEAM_USER= STEAM_TILE=1 FORCE= UPDATE_CHECK=1
+GAME= STEAM_USER= STEAM_TILE=1 FORCE=
 while [ $# -gt 0 ]; do
   case $1 in
     --game) GAME=$2; shift 2 ;;
@@ -26,7 +26,6 @@ while [ $# -gt 0 ]; do
     --out) OUT_APP=$2; shift 2 ;;
     --no-steam-tile) STEAM_TILE=; shift ;;
     --force) FORCE=1; shift ;;
-    --no-update-check) UPDATE_CHECK=; shift ;;
     *) echo "unknown option $1"; exit 2 ;;
   esac
 done
@@ -83,20 +82,14 @@ add_steam_tile() {
     python3 -I "$S/steam_shortcut.py" --app "$OUT_APP" || echo "(could not add the Steam library entry)"
   fi
 }
-# A LaunchAgent that checks Steam once a day (and at login) and notifies when the game has updated.
-install_update_check() {
-  [ -n "$UPDATE_CHECK" ] || return 0
-  ( need_steamcmd ) || { echo "(skipping the daily update check: no SteamCMD)"; return 0; }
-  cp "$HERE/scripts/update_check.sh" "$HERE/scripts/steam_appinfo.py" "$LMC_CACHE/"
+# Older versions installed a daily update check (a LaunchAgent). LethalMac runs nothing in the background now, so
+# take it off Macs that still have it. ponytail: drop this once nobody runs a version from before 2026-10-08.
+remove_update_check() {
   PL="$HOME/Library/LaunchAgents/com.lethal-mac-converter.update-check.plist"
-  mkdir -p "$HOME/Library/LaunchAgents"
-  python3 -I -c 'import plistlib, sys; plistlib.dump({"Label": "com.lethal-mac-converter.update-check",
-    "ProgramArguments": ["/bin/sh", sys.argv[1], sys.argv[2]], "RunAtLoad": True,
-    "StartCalendarInterval": {"Hour": 12, "Minute": 0}, "ProcessType": "Background"}, open(sys.argv[3], "wb"))' \
-    "$LMC_CACHE/update_check.sh" "$OUT_APP" "$PL"
+  [ -f "$PL" ] || return 0
   launchctl bootout "gui/$(id -u)" "$PL" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$PL"
-  echo "Daily update check on (turn off: sh \"$LMC_CACHE/update_check.sh\" uninstall)"
+  rm -f "$PL" "$LMC_CACHE/update_check.sh" "$LMC_CACHE/steam_appinfo.py" "$LMC_CACHE/seen-buildid"
+  echo "Removed the daily update check an older LethalMac installed"
 }
 
 # --- 0. requirements -----------------------------------------------------------------------------------
@@ -127,13 +120,13 @@ fi
 
 # --- 2. your Windows game files ------------------------------------------------------------------------
 # Which converter built the app: only the files that shape it count, so changes to e.g. the Steam entry or
-# the update check never force a rebuild.
+# the README never force a rebuild.
 CONV_ID=$(srchash tools native scripts/assemble_app.py scripts/build_inputsystem.py scripts/video_shader.py)
 STAMP_FILE="$OUT_APP/Contents/Resources/converter-stamp.txt"
 up_to_date() {
   say "$OUT_APP is up to date ($1). Nothing to do."
   add_steam_tile
-  install_update_check
+  remove_update_check
   exit 0
 }
 STEAM="$HOME/Library/Application Support/Steam"
@@ -259,7 +252,7 @@ codesign --force --deep -s - "$NEW_APP"
 rm -rf "$OUT_APP"
 mv "$NEW_APP" "$OUT_APP"
 
-# --- 7. Steam library entry and daily update check ---------------------------------------------------------
+# --- 7. Steam library entry ------------------------------------------------------------------------------
 add_steam_tile
-install_update_check
+remove_update_check
 say "Done: $OUT_APP"
