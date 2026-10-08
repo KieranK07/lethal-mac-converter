@@ -74,6 +74,11 @@ def set_value(items, key, value):
     items.append((key, value))
 
 
+def buildid(path):
+    m = re.search(r'"buildid"\s+"(\d+)"', open(path, encoding='utf-8').read()) if os.path.exists(path) else None
+    return m and m.group(1)
+
+
 def launch_options(app):
     exe = os.path.join(app, 'Contents/MacOS', os.path.basename(app.rstrip('/'))[:-len('.app')])
     return '\\"' + exe + '\\" %command%'  # VDF-escaped quotes around the path
@@ -104,7 +109,10 @@ def main():
         return app is not None and dict((k, v) for k, v in app if not isinstance(v, list)).get('LaunchOptions') == want
 
     if a.check:
-        ok = os.path.islink(link) and os.path.exists(manifest) and configs and all(configured(c) for c in configs)
+        # Steam's copy of the install record must name the build we have (it changes when the game updates)
+        src = os.path.join(a.game, f'steamapps/appmanifest_{APPID}.acf')
+        ok = (os.path.islink(link) and buildid(manifest) is not None and buildid(manifest) == buildid(src)
+              and configs and all(configured(c) for c in configs))
         sys.exit(0 if ok else 1)
     if subprocess.run(['pgrep', '-x', 'steam_osx'], capture_output=True).returncode == 0:
         sys.exit('Quit Steam first (it rewrites its config files when it exits).')

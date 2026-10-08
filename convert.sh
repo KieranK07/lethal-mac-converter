@@ -1,10 +1,10 @@
 #!/bin/sh
 # Turn your own Windows copy of Lethal Company into a native Apple Silicon app.
 #
-#   double-click "LethalMac.command", or ./convert.sh with no options: asks for your Steam login
-#     once and downloads your copy with Valve's SteamCMD
+#   double-click "LethalMac.command", or ./convert.sh with no options: the Steam app you're signed into
+#     downloads your copy (you paste one command into Steam's console). LethalMac never asks for your password.
 #   ./convert.sh --game "/path/to/Lethal Company"        # use an existing Windows install instead
-#   ./convert.sh --steam-user <your Steam login name>
+#   ./convert.sh --steam-user <your Steam login name>    # download with Valve's SteamCMD and your login instead
 #   options: --out "<path>.app" (default ~/Applications/Lethal Company.app), --no-steam-tile,
 #            --force (rebuild even if the app is already up to date), --no-update-check
 #
@@ -126,14 +126,6 @@ TERMS
 fi
 
 # --- 2. your Windows game files ------------------------------------------------------------------------
-if [ -z "$GAME" ] && [ -z "$STEAM_USER" ]; then
-  STEAM_USER=$(cat "$LMC_CACHE/steam-user" 2>/dev/null || true)
-  if [ -z "$STEAM_USER" ]; then
-    printf '\nYour Steam login name (the one you sign in with, not your profile name): '
-    read -r STEAM_USER
-    [ -n "$STEAM_USER" ] || die "no Steam login given"
-  fi
-fi
 # Which converter built the app: only the files that shape it count, so changes to e.g. the Steam entry or
 # the update check never force a rebuild.
 CONV_ID=$(srchash tools native scripts/assemble_app.py scripts/build_inputsystem.py scripts/video_shader.py)
@@ -144,24 +136,64 @@ up_to_date() {
   install_update_check
   exit 0
 }
-if [ -n "$STEAM_USER" ]; then
-  need_steamcmd
+STEAM="$HOME/Library/Application Support/Steam"
+# By default the Steam app you're signed into downloads the files: its own download_depot console command,
+# pasted by you. It uses your existing Steam session and licence, so LethalMac never sees your password.
+# ponytail: downloads the whole depot (about 1.7 GB) on every game update; download_depot's delta manifest
+# argument could fetch only changed files if that ever matters.
+steam_download() {  # $1: the public build id being downloaded
+  CMD="download_depot 1966720 1966721"
+  pgrep -x steam_osx >/dev/null || { open -a Steam; say "Opening Steam (sign in if it asks)"; sleep 10; }
+  START=$(date '+%Y-%m-%d %H:%M:%S')
+  printf '%s' "$CMD" | pbcopy
+  open "steam://open/console"
+  say "Steam's console just opened. Paste there (Cmd+V) and press Return:  $CMD"
+  echo "    It's already on your clipboard. Steam then downloads your copy (about 1.7 GB) and this window waits."
+  echo "    No console? Copy the line above, open steam://open/console in Safari and allow it to open Steam."
+  while :; do  # Steam logs "Depot download complete : "<folder>" (manifest <id>)" when it's done
+    DONE=$(cat "$STEAM/logs/content_log.txt" "$STEAM/logs/console_log.txt" 2>/dev/null |
+      awk -v t="$START" '/Depot download complete/ && /app_1966720.depot_1966721/ && substr($0, 2, 19) >= t' | tail -1)
+    [ -n "$DONE" ] && break
+    printf '\r    downloaded so far: %s MB ' "$(du -sm "$STEAM/steamapps/content/app_1966720/depot_1966721" 2>/dev/null | cut -f1)"
+    sleep 5
+  done
+  echo
+  DEPOT=$(printf '%s\n' "$DONE" | sed -n 's/.*complete : "\(.*\)" (manifest.*/\1/p' | tr '\\' /)  # Steam mixes in \ separators
+  case $DEPOT in /*) ;; *) DEPOT="$STEAM/$DEPOT" ;; esac
+  MANIFEST=$(printf '%s\n' "$DONE" | sed -n 's/.*(manifest \([0-9]*\)).*/\1/p')
+  [ -d "$DEPOT/Lethal Company_Data" ] || die "Steam said it finished, but there's no game in $DEPOT"
+  rm -rf "$LMC_CACHE/game.old"
+  if [ -d "$GAME" ]; then mv "$GAME" "$LMC_CACHE/game.old"; fi
+  mv "$DEPOT" "$GAME"
+  rm -rf "$LMC_CACHE/game.old"
+  # The install record SteamCMD would write, so Steam's library can register this copy (add_steam_tile)
+  SIZE=$(find "$GAME" -type f -exec stat -f %z {} + | awk '{s += $1} END {printf "%.0f", s}')
+  OWNER=$(awk -F'"' '/^\t"7656119[0-9]+"/ {id = $2; if (!first) first = id} /"MostRecent"[[:space:]]+"1"/ {print id; found = 1; exit}
+    END {if (!found) print first}' "$STEAM/config/loginusers.vdf" 2>/dev/null)
+  mkdir -p "$GAME/steamapps"
+  printf '"AppState"\n{\n\t"appid"\t\t"1966720"\n\t"Universe"\t\t"1"\n\t"name"\t\t"Lethal Company"\n\t"StateFlags"\t\t"4"\n\t"installdir"\t\t"Lethal Company"\n\t"lastupdated"\t\t"%s"\n\t"LastPlayed"\t\t"0"\n\t"SizeOnDisk"\t\t"%s"\n\t"StagingSize"\t\t"0"\n\t"buildid"\t\t"%s"\n\t"LastOwner"\t\t"%s"\n\t"DownloadType"\t\t"1"\n\t"UpdateResult"\t\t"0"\n\t"BytesToDownload"\t\t"0"\n\t"BytesDownloaded"\t\t"0"\n\t"BytesToStage"\t\t"0"\n\t"BytesStaged"\t\t"0"\n\t"TargetBuildID"\t\t"%s"\n\t"AutoUpdateBehavior"\t\t"0"\n\t"AllowOtherDownloadsWhileRunning"\t\t"0"\n\t"ScheduledAutoUpdate"\t\t"0"\n\t"FullValidateAfterNextUpdate"\t\t"0"\n\t"InstalledDepots"\n\t{\n\t\t"1966721"\n\t\t{\n\t\t\t"manifest"\t\t"%s"\n\t\t\t"size"\t\t"%s"\n\t\t}\n\t}\n\t"SharedDepots"\n\t{\n\t\t"228988"\t\t"228980"\n\t}\n\t"UserConfig"\n\t{\n\t}\n\t"MountedConfig"\n\t{\n\t}\n}\n' \
+    "$(date +%s)" "$SIZE" "$1" "${OWNER:-0}" "$1" "$MANIFEST" "$SIZE" > "$GAME/steamapps/appmanifest_1966720.acf"
+}
+if [ -z "$GAME" ]; then
+  need_steamcmd  # anonymous here: it only asks Steam for the current build id, no login
   GAME="$LMC_CACHE/game"
-  # Already built from the current Steam build? Then no login at all.
-  if [ -z "$FORCE" ] && [ -f "$GAME/steamapps/appmanifest_1966720.acf" ]; then
-    LATEST=$(latest_build)
-    [ -n "$LATEST" ] && [ "$(cat "$STAMP_FILE" 2>/dev/null)" = "game=steam-$LATEST converter=$CONV_ID" ] && up_to_date "steam-$LATEST"
+  ACF="$GAME/steamapps/appmanifest_1966720.acf"
+  LATEST=$(latest_build)
+  [ -n "$LATEST" ] || die "couldn't reach Steam to check for the current version of the game; try again in a minute"
+  # Already built from the current Steam build? Then nothing to download.
+  [ -z "$FORCE" ] && [ "$(cat "$STAMP_FILE" 2>/dev/null)" = "game=steam-$LATEST converter=$CONV_ID" ] && up_to_date "steam-$LATEST"
+  if [ -n "$STEAM_USER" ]; then
+    # SteamCMD signing in as you replaces the Steam app's session ("Session Replaced"), and the app doesn't
+    # reconnect by itself, so games then can't reach Steam.
+    close_steam "SteamCMD signs in as you, which would sign the Steam app out"
+    say "Getting your Windows copy (app 1966720) as $STEAM_USER; the first time, SteamCMD asks for your password / Steam Guard"
+    CHECK=validate  # check every file only on the first download; after that Steam sends just what changed
+    [ -f "$ACF" ] && CHECK=
+    steamcmd +@sSteamCmdForcePlatformType windows +force_install_dir "$GAME" +login "$STEAM_USER" +app_update 1966720 $CHECK +quit
+  elif [ "$(sed -n 's/.*"buildid"[[:space:]]*"\([0-9]*\)".*/\1/p' "$ACF" 2>/dev/null | head -1)" != "$LATEST" ]; then
+    steam_download "$LATEST"
   fi
-  # SteamCMD signing in as you replaces the Steam app's session ("Session Replaced"), and the app doesn't
-  # reconnect by itself, so games then can't reach Steam.
-  close_steam "SteamCMD signs in as you, which would sign the Steam app out"
-  say "Getting your Windows copy (app 1966720) as $STEAM_USER; the first time, SteamCMD asks for your password / Steam Guard"
-  CHECK=validate  # check every file only on the first download; after that Steam sends just what changed
-  [ -f "$GAME/steamapps/appmanifest_1966720.acf" ] && CHECK=
-  steamcmd +@sSteamCmdForcePlatformType windows +force_install_dir "$GAME" +login "$STEAM_USER" +app_update 1966720 $CHECK +quit
-  echo "$STEAM_USER" > "$LMC_CACHE/steam-user"
 fi
-[ -n "$GAME" ] || die "pass --game <Windows install folder> or --steam-user <Steam login>"
 [ -d "$GAME/Lethal Company_Data" ] || die "no 'Lethal Company_Data' in $GAME"
 UNITY=$(head -c 4096 "$GAME/Lethal Company_Data/globalgamemanagers" | LC_ALL=C grep -a -o -m1 '20[0-9][0-9]\.[0-9]*\.[0-9]*f[0-9]*' || true)
 [ "$UNITY" = 2022.3.62f2 ] || die "this game build uses Unity ${UNITY:-?}; the converter supports 2022.3.62f2. Get a newer converter."
