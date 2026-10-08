@@ -1,0 +1,95 @@
+<!doctype html>
+<!-- LethalMac branding. Original artwork, no game assets. Render (1280x640 banner, 512x512 icon):
+     chrome --headless=new --hide-scrollbars --window-size=1280,640 --screenshot=banner.png "brand.html#banner"
+     chrome --headless=new --hide-scrollbars --window-size=512,512  --screenshot=icon.png   "brand.html#icon" -->
+<meta charset="utf-8">
+<style>
+  :root { --hot: #ff6a2b; --dim: #ff6a2b33; --ink: #f2ebe4; --mute: #b8a99c; }
+  * { margin: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0908; }
+  body {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink);
+    background: radial-gradient(ellipse at 30% 50%, #2a140b 0%, #120c09 45%, #070605 100%);
+    display: flex; align-items: center; position: relative;
+  }
+  body::after {  /* CRT scanlines + vignette */
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background:
+      repeating-linear-gradient(to bottom, #0000 0 2px, #0000002e 2px 4px),
+      radial-gradient(ellipse at center, #0000 55%, #000a 100%);
+  }
+  .emblem { flex: none; filter: drop-shadow(0 0 18px #ff6a2b55); }
+  .word { font-weight: 800; letter-spacing: -0.02em; line-height: 1; white-space: nowrap; }
+  .word b { color: var(--hot); text-shadow: 0 0 22px #ff6a2b99; }
+  .cursor { display: inline-block; background: var(--hot); box-shadow: 0 0 16px #ff6a2b; vertical-align: baseline; }
+  .tag { color: var(--hot); letter-spacing: 0.25em; font-weight: 700; }
+  .sub { color: var(--ink); }
+  .feat { color: var(--mute); }
+  .url { color: var(--mute); opacity: 0.8; }
+
+  body.banner { padding: 0 90px; gap: 70px; }
+  body.banner .emblem { width: 360px; height: 360px; }
+  body.banner .tag { font-size: 20px; margin-bottom: 26px; }
+  body.banner .word { font-size: 104px; }
+  body.banner .cursor { width: 46px; height: 82px; margin-left: 10px; }
+  body.banner .sub { font-size: 31px; margin-top: 30px; }
+  body.banner .feat { font-size: 20px; margin-top: 18px; white-space: nowrap; }
+  body.banner .url { position: absolute; right: 44px; bottom: 32px; font-size: 18px; }
+
+  body.icon { flex-direction: column; justify-content: center; gap: 6px; }
+  body.icon .emblem { width: 340px; height: 340px; }
+  body.icon .word { font-size: 78px; }
+  body.icon .cursor { width: 34px; height: 60px; margin-left: 6px; }
+  body.icon .text { text-align: center; }
+  body.icon .tag, body.icon .sub, body.icon .feat, body.icon .url { display: none; }
+</style>
+<body>
+<svg class="emblem" viewBox="0 0 200 200" aria-hidden="true">
+  <defs>
+    <radialGradient id="moon" cx="38%" cy="34%" r="70%">
+      <stop offset="0" stop-color="#5a3a28"/><stop offset="0.55" stop-color="#2a1a12"/><stop offset="1" stop-color="#0e0907"/>
+    </radialGradient>
+    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff6a2b" stop-opacity="0"/><stop offset="1" stop-color="#ff6a2b" stop-opacity="0.35"/>
+    </linearGradient>
+    <clipPath id="front"><rect x="0" y="100" width="200" height="100" transform="rotate(-18 100 100)"/></clipPath>
+  </defs>
+  <!-- radar scope -->
+  <g fill="none" stroke="#ff6a2b" stroke-opacity="0.22" stroke-width="0.8">
+    <circle cx="100" cy="100" r="96"/><circle cx="100" cy="100" r="74"/>
+    <path d="M100 4V196M4 100H196"/>
+  </g>
+  <g stroke="#ff6a2b" stroke-opacity="0.45" stroke-width="1">
+    <path d="M100 4v6M100 190v6M4 100h6M190 100h6"/>
+  </g>
+  <g transform="rotate(20 100 100)">
+    <path d="M100 100L100 4A96 96 0 0 1 183 52Z" fill="url(#sweep)"/>
+    <path d="M100 100L183 52" stroke="#ff6a2b" stroke-opacity="0.7" stroke-width="1.2"/>
+  </g>
+  <!-- orbit, back half -->
+  <ellipse cx="100" cy="100" rx="88" ry="26" transform="rotate(-18 100 100)" fill="none" stroke="#ff6a2b" stroke-opacity="0.35" stroke-width="1.6" stroke-dasharray="4 5"/>
+  <!-- moon -->
+  <circle cx="100" cy="100" r="46" fill="url(#moon)"/>
+  <circle cx="100" cy="100" r="46" fill="none" stroke="#ff6a2b" stroke-width="1.6" stroke-opacity="0.9"/>
+  <g fill="#0b0705" fill-opacity="0.55" stroke="#ff6a2b" stroke-opacity="0.25" stroke-width="0.6">
+    <circle cx="84" cy="88" r="9"/><circle cx="114" cy="80" r="5"/><circle cx="110" cy="114" r="11"/><circle cx="82" cy="117" r="4"/>
+  </g>
+  <!-- orbit, front half over the moon -->
+  <g clip-path="url(#front)">
+    <ellipse cx="100" cy="100" rx="88" ry="26" transform="rotate(-18 100 100)" fill="none" stroke="#ff6a2b" stroke-width="2"/>
+  </g>
+  <!-- the ship -->
+  <g transform="rotate(-18 100 100)">
+    <circle cx="160" cy="119" r="9" fill="#ff6a2b" fill-opacity="0.25"/>
+    <circle cx="160" cy="119" r="4.2" fill="#ffd2b8"/>
+  </g>
+</svg>
+<div class="text">
+  <div class="tag">UNOFFICIAL FAN PROJECT</div>
+  <div class="word">Lethal<b>Mac</b><span class="cursor"></span></div>
+  <div class="sub">Play Lethal Company natively<br>on Apple Silicon Macs</div>
+  <div class="feat">Cross-play with Windows · Voice chat · Steam overlay</div>
+</div>
+<div class="url">github.com/KieranK07/lethalmac</div>
+<script>document.body.className = location.hash.slice(1) || 'banner'</script>
+</body>

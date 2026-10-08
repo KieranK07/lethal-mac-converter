@@ -1,4 +1,6 @@
-# lethal-mac-converter
+# LethalMac
+
+![LethalMac: play Lethal Company natively on Apple Silicon Macs](docs/brand/banner.png)
 
 Turns **your own** Steam copy of Lethal Company (Windows) into a native Apple Silicon Mac app. It still plays with
 friends on Windows: the converted app talks to Steam as the real game.
@@ -19,7 +21,7 @@ Not affiliated with Zeekerss, Unity, Valve or Discord.
    - Rosetta (`softwareupdate --install-rosetta --agree-to-license`), for Valve's SteamCMD
    - Lethal Company on your Steam account
    - about 6 GB of free disk space
-2. Double-click **`Convert Lethal Company.command`**. The first time, macOS may refuse to run it. If so, right-click it, choose **Open**, then **Open** again.
+2. Double-click **`LethalMac.command`**. The first time, macOS may say it can't be opened. If so, open System Settings → Privacy & Security, scroll down and click **Open Anyway**.
 3. Answer three prompts:
    - type `yes` to accept Unity's terms
    - your Steam login name
@@ -30,7 +32,7 @@ Not affiliated with Zeekerss, Unity, Valve or Discord.
 ## Updating
 
 When Lethal Company updates, your Windows friends get it automatically, and you need it too to play with them.
-Double-click `Convert Lethal Company.command` again:
+Double-click `LethalMac.command` again:
 - It downloads only what changed. Your Steam login is remembered, and SteamCMD keeps its own session.
 - If neither the game nor the converter changed, it says "up to date" and stops (under a minute).
 - Otherwise it rebuilds, which takes about 10 min. The new app is built alongside the old one and swapped in at the end, so a failed update leaves your old app working.

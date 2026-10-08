@@ -1,7 +1,7 @@
 #!/bin/sh
 # Turn your own Windows copy of Lethal Company into a native Apple Silicon app.
 #
-#   double-click "Convert Lethal Company.command", or ./convert.sh with no options: asks for your Steam login
+#   double-click "LethalMac.command", or ./convert.sh with no options: asks for your Steam login
 #     once and downloads your copy with Valve's SteamCMD
 #   ./convert.sh --game "/path/to/Lethal Company"        # use an existing Windows install instead
 #   ./convert.sh --steam-user <your Steam login name>

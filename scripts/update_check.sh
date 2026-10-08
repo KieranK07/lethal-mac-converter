@@ -22,7 +22,7 @@ LATEST=$(HOME="$CACHE/steamcmd-home" "$CACHE/steamcmd/steamcmd.sh" +login anonym
 # Steam replaces its cached store data for the game now and then, which takes the Play button away again
 if [ -L "$HOME/Library/Application Support/Steam/steamapps/common/Lethal Company" ] &&
    ! python3 -I "$CACHE/steam_appinfo.py" --check >/dev/null 2>&1; then
-  osascript -e 'display notification "Double-click Convert Lethal Company.command to bring it back (under a minute)." with title "Steam reset Lethal Company'"'"'s Play button" sound name "default"'
+  osascript -e 'display notification "Double-click LethalMac.command to bring it back (under a minute)." with title "Steam reset Lethal Company'"'"'s Play button" sound name "default"'
 fi
 [ -n "$LATEST" ] || exit 0  # offline or Steam down: try again next time
 
@@ -36,4 +36,4 @@ if [ -n "$BUILT" ]; then
 elif [ -z "$SEEN" ] || [ "$LATEST" = "$SEEN" ]; then
   exit 0
 fi
-osascript -e 'display notification "Double-click Convert Lethal Company.command to update your Mac app (about 10 min)." with title "Lethal Company updated on Steam" sound name "default"'
+osascript -e 'display notification "Double-click LethalMac.command to update your Mac app (about 10 min)." with title "Lethal Company updated on Steam" sound name "default"'

@@ -14,6 +14,7 @@ __pycache__/
 *.icns
 *.ico
 *.png
+!docs/brand/*.png
 *.assets
 *.resS
 *.resource
